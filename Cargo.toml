@@ -1,0 +1,20 @@
+[package]
+name = "journey-model-parser"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[[bin]]
+name = "journey-model-parser"
+path = "src/bin/main.rs"
+test = false
+
+[dependencies]
+hex = "0.4.3"
+serde = { version = "1.0", features = ["derive"] }
+serde-xml-rs = "0.6.0"
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
