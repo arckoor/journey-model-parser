@@ -3,7 +3,7 @@ use std::os::raw::{c_char, c_float, c_ulonglong};
 use std::panic;
 use std::path::Path;
 
-use tracing::info;
+use tracing::{error, info};
 
 use crate::parse;
 
@@ -22,10 +22,9 @@ pub struct ParsedModelData {
 
 #[no_mangle]
 pub extern "C" fn ffi_parse(xml_file_path: *const c_char) -> *mut ParsedModelData {
+    let c_str = unsafe { CStr::from_ptr(xml_file_path) };
+    let xml_file = Path::new(c_str.to_str().unwrap());
     let result = panic::catch_unwind(|| {
-        let c_str = unsafe { CStr::from_ptr(xml_file_path) };
-        let xml_file = Path::new(c_str.to_str().unwrap());
-
         let (vertices, uvs, faces) = parse(xml_file);
 
         let vertices_flat: Vec<f32> = vertices.into_iter().flatten().collect();
@@ -56,7 +55,10 @@ pub extern "C" fn ffi_parse(xml_file_path: *const c_char) -> *mut ParsedModelDat
 
     match result {
         Ok(ptr) => ptr,
-        Err(_) => std::ptr::null_mut(),
+        Err(_) => {
+            error!("Failed to parse model data for {:?}", xml_file);
+            std::ptr::null_mut()
+        }
     }
 }
 

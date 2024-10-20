@@ -8,6 +8,7 @@ from mathutils import Vector, Matrix  # type: ignore
 
 LIB_PATH = ""
 XML_PATH = ""
+TEX_PATH = ""
 DMI_PATH = ""
 
 bl_info = {
@@ -17,6 +18,7 @@ bl_info = {
     "description": "Import DecorationMeshInstances.lua from Journey",
 }
 xml_cache = {}
+tex_cache = {}
 lib = ctypes.CDLL(LIB_PATH)
 
 
@@ -36,22 +38,30 @@ lib.ffi_parse.argtypes = [ctypes.c_char_p]
 lib.ffi_free.argtypes = [ctypes.POINTER(ParsedModelData)]
 
 
-def cache_xml():
+def create_cache(path, ext, cache):
     i = 0
-    for root, _, files in os.walk(XML_PATH):
+    for root, _, files in os.walk(path):
         for file in files:
-            if file.endswith('.xml'):
+            if file.endswith(ext):
                 filename_without_ext = os.path.splitext(file)[0]
                 full_path = os.path.join(root, file)
-                xml_cache[filename_without_ext] = full_path
+                cache[filename_without_ext] = full_path
                 i = i+1
-    print(f'Cached {i} xml files.')
+    print(f'Cached {i} {ext} files.')
 
 
-def find_xml_from_mesh_name(mesh_name):
-    for filename, full_path in xml_cache.items():
-        if mesh_name in filename:
+def find_from_cache(name, cache):
+    for filename, full_path in cache.items():
+        if name in filename:
             return full_path
+
+
+def find_tex_from_tex_name(tex_name: str):
+    if tex_name is None:
+        return None
+    tex_name = tex_name.replace("P_", "")
+    tex_name = f"{tex_name}{tex_name}"
+    return find_from_cache(tex_name, tex_cache)
 
 
 def traverse_lua_table(lua_table):
@@ -59,6 +69,7 @@ def traverse_lua_table(lua_table):
         if isinstance(value, (lua_table.__class__,)):
             d = dict(value)
             mat = None
+            tex = None
 
             if isinstance(d["Transformation"], (lua_table.__class__,)):
                 numbers = [c for _, r in dict(d["Transformation"]).items() for _, c in dict(r).items()]
@@ -72,21 +83,38 @@ def traverse_lua_table(lua_table):
                 print("Failed to parse matrix")
                 continue
 
+            if isinstance(d["ShaderParams"], (lua_table.__class__,)):
+                for _, entry in d["ShaderParams"].items():
+                    if entry["ParamName"] == "texColor":
+                        tex_ = entry["ParamVal"]
+                        if tex == "Blank":
+                            continue
+                        tex = tex_
+                        break
+                    elif entry["ParamName"] == "texCham":
+                        tex = entry["ParamVal"]
+
+            if not tex:
+                print("Failed to parse texture")
+
             mesh_name = d["Mesh"]
             matrix = Matrix(mat)
 
-            xml_name = find_xml_from_mesh_name(mesh_name)
+            xml_name = find_from_cache(mesh_name, xml_cache)
+            tex = find_tex_from_tex_name(tex)
             if xml_name is not None:
-                print(f"Spawning {xml_name} for {mesh_name}")
-                spawn_xml_model(xml_name, mesh_name, matrix)
+                print(f"Spawning {xml_name} for {mesh_name} with {tex}")
+                spawn_xml_model(xml_name, mesh_name, tex, matrix)
 
 
-def spawn_xml_model(xml_file, mesh_name, transformation_matrix):
-    result = lib.ffi_parse(xml_file.encode("utf-8")).contents
+def spawn_xml_model(xml_file, mesh_name, tex, transformation_matrix):
+    result = lib.ffi_parse(xml_file.encode("utf-8"))
 
-    if result is None:
+    if not result:
         print(f"Failed to parse {xml_file}")
         return
+
+    result = result.contents
 
     vertices_flat = [round(result.vertices_ptr[i], 4) for i in range(result.vertices_len)]
     vertices = [Vector((vertices_flat[i], vertices_flat[i + 1], vertices_flat[i + 2])) for i in range(0, len(vertices_flat), 3)]
@@ -121,9 +149,22 @@ def spawn_xml_model(xml_file, mesh_name, transformation_matrix):
     bpy.context.collection.objects.link(obj)
     obj.matrix_world = transformation_matrix
 
+    if tex is not None:
+        texture = bpy.data.images.load(tex)
+        material = bpy.data.materials.new(name=f"{mesh_name}_material")
+        material.use_nodes = True
+        obj.data.materials.append(material)
+
+        bsdf = material.node_tree.nodes.get('Principled BSDF')
+        tex_image = material.node_tree.nodes.new('ShaderNodeTexImage')
+        tex_image.image = texture
+
+        material.node_tree.links.new(bsdf.inputs['Base Color'], tex_image.outputs['Color'])
+
 
 if __name__ == "__main__":
-    cache_xml()
+    create_cache(XML_PATH, '.xml', xml_cache)
+    create_cache(TEX_PATH, '.png', tex_cache)
 
     os.chdir(DMI_PATH)
     lua = LuaRuntime(unpack_returned_tuples=True)
