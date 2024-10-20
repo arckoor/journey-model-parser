@@ -63,7 +63,9 @@ pub struct SegmentSet {
 #[derive(Deserialize, Clone)]
 pub struct RenderDataSource {
     #[serde(rename = "RENDERINDEXSOURCE")]
-    pub index_sources: Vec<RenderIndexSource>,
+    pub index_source: RenderIndexSource,
+    #[serde(rename = "RENDERSTREAM")]
+    pub streams: Vec<RenderStream>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -84,14 +86,20 @@ pub struct IndexSourceData {
     pub text: String,
 }
 
-pub fn parse_xml_file(path: &Path) -> (Vec<DataBlock>, Vec<RenderIndexSource>) {
+#[derive(Deserialize, Clone)]
+pub struct RenderStream {
+    #[serde(rename = "dataBlock")]
+    pub data_block: String,
+}
+
+pub fn parse_xml_file(path: &Path) -> (Vec<DataBlock>, Vec<RenderDataSource>) {
     let pssg_file: PssgFile = {
         let file = File::open(path).expect("Failed to open file");
         let reader = BufReader::new(file);
         from_reader(reader).expect("Failed to parse XML")
     };
 
-    let data_blocks: Vec<DataBlock> = pssg_file
+    let data_blocks = pssg_file
         .clone()
         .database
         .libraries
@@ -100,14 +108,13 @@ pub fn parse_xml_file(path: &Path) -> (Vec<DataBlock>, Vec<RenderIndexSource>) {
         .flat_map(|l| l.data_blocks)
         .collect();
 
-    let render_index_sources: Vec<RenderIndexSource> = pssg_file
+    let render_index_sources = pssg_file
         .database
         .libraries
         .into_iter()
         .filter(|l| l.library_type == "SEGMENTSET")
         .flat_map(|l| l.segment_sets)
         .flat_map(|s| s.render_data_sources)
-        .flat_map(|r| r.index_sources)
         .collect();
 
     (data_blocks, render_index_sources)

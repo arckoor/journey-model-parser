@@ -3,7 +3,6 @@ from lupa import LuaRuntime
 import os
 import ctypes
 import bpy  # type: ignore
-from bpy_extras.io_utils import ImportHelper  # type: ignore
 from mathutils import Vector, Matrix  # type: ignore
 
 
@@ -55,7 +54,7 @@ def find_xml_from_mesh_name(mesh_name):
             return full_path
 
 
-def traverse_lua_table(lua_table, depth=0):
+def traverse_lua_table(lua_table):
     for _, value in lua_table.items():
         if isinstance(value, (lua_table.__class__,)):
             d = dict(value)
@@ -83,19 +82,19 @@ def traverse_lua_table(lua_table, depth=0):
 
 
 def spawn_xml_model(xml_file, mesh_name, transformation_matrix):
-    result = lib.ffi_parse(xml_file.encode("utf-8"))
+    result = lib.ffi_parse(xml_file.encode("utf-8")).contents
 
     if result is None:
         print(f"Failed to parse {xml_file}")
         return
 
-    vertices_flat = [round(result.contents.vertices_ptr[i], 4) for i in range(result.contents.vertices_len)]
+    vertices_flat = [round(result.vertices_ptr[i], 4) for i in range(result.vertices_len)]
     vertices = [Vector((vertices_flat[i], vertices_flat[i + 1], vertices_flat[i + 2])) for i in range(0, len(vertices_flat), 3)]
 
-    uvs_flat = [round(result.contents.uvs_ptr[i], 4) for i in range(result.contents.uvs_len)]
+    uvs_flat = [round(result.uvs_ptr[i], 4) for i in range(result.uvs_len)]
     uvs = [(uvs_flat[i], uvs_flat[i + 1]) for i in range(0, len(uvs_flat), 2)]
 
-    faces_flat = [round(result.contents.faces_ptr[i], 4) for i in range(result.contents.faces_len)]
+    faces_flat = [round(result.faces_ptr[i], 4) for i in range(result.faces_len)]
     faces = [(faces_flat[i], faces_flat[i + 1], faces_flat[i + 2]) for i in range(0, len(faces_flat), 3)]
 
     lib.ffi_free(result)
@@ -114,9 +113,7 @@ def spawn_xml_model(xml_file, mesh_name, transformation_matrix):
     for face in mesh.polygons:
         for loop_idx in face.loop_indices:
             vert_idx = mesh.loops[loop_idx].vertex_index
-            # FIXME not good
-            if vert_idx < len(uvs):
-                uv_layer[loop_idx].uv = uvs[vert_idx]
+            uv_layer[loop_idx].uv = uvs[vert_idx]
 
     mesh.update()
 
@@ -125,42 +122,7 @@ def spawn_xml_model(xml_file, mesh_name, transformation_matrix):
     obj.matrix_world = transformation_matrix
 
 
-class ImportLUA(bpy.types.Operator, ImportHelper):
-    bl_idname = "import.lua"
-    bl_label = "Import DMI.lua"
-
-    filename_ext = ".lua"
-
-    def execute(self, context):
-        lua = LuaRuntime(unpack_returned_tuples=True)
-        cache_xml()
-
-        os.chdir(DMI_PATH)
-        lua = LuaRuntime(unpack_returned_tuples=True)
-        lua.execute('dofile("DecorationMeshInstances.lua")')
-        dmi_table = lua.globals().DecorationMeshInstances
-        return {'FINISHED'}
-        traverse_lua_table(dmi_table)
-        return {'FINISHED'}
-
-
-def menu_func_import(self, context):
-    self.layout.operator(ImportLUA.bl_idname, text="XML Importer")
-
-
-def register():
-    bpy.utils.register_class(ImportLUA)
-    bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
-
-
-def unregister():
-    bpy.utils.unregister_class(ImportLUA)
-    bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
-
-
 if __name__ == "__main__":
-    register()
-    lua = LuaRuntime(unpack_returned_tuples=True)
     cache_xml()
 
     os.chdir(DMI_PATH)
