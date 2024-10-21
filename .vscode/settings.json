@@ -1,12 +1,14 @@
 {
 	"cSpell.words": [
 		"bsdf",
+		"clippy",
 		"DATABLOCK",
 		"DATABLOCKDATA",
 		"DATABLOCKSTREAM",
 		"dofile",
 		"idname",
 		"INDEXSOURCEDATA",
+		"libjourney",
 		"lupa",
 		"mathutils",
 		"pssg",
@@ -18,6 +20,8 @@
 		"RENDERINTERFACEBOUND",
 		"RENDERSTREAM",
 		"repr",
+		"rustfmt",
+		"rustup",
 		"ulonglong"
 	]
 }

@@ -35,7 +35,7 @@ pub struct DataBlock {
     #[serde(rename = "DATABLOCKSTREAM")]
     pub stream: DataBlockStream,
     #[serde(rename = "DATABLOCKDATA")]
-    pub data: DataBlockData,
+    pub data: Option<DataBlockData>,
     #[serde(rename = "id")]
     pub id: String,
 }
@@ -75,7 +75,7 @@ pub struct RenderIndexSource {
     #[serde(rename = "count")]
     pub count: usize,
     #[serde(rename = "INDEXSOURCEDATA")]
-    pub index_data: IndexSourceData,
+    pub index_data: Option<IndexSourceData>,
     #[serde(rename = "format")]
     pub data_type: String,
 }
@@ -106,6 +106,7 @@ pub fn parse_xml_file(path: &Path) -> (Vec<DataBlock>, Vec<RenderDataSource>) {
         .into_iter()
         .filter(|l| l.library_type == "RENDERINTERFACEBOUND")
         .flat_map(|l| l.data_blocks)
+        .filter(|d| d.data.is_some())
         .collect();
 
     let render_index_sources = pssg_file
@@ -115,6 +116,7 @@ pub fn parse_xml_file(path: &Path) -> (Vec<DataBlock>, Vec<RenderDataSource>) {
         .filter(|l| l.library_type == "SEGMENTSET")
         .flat_map(|l| l.segment_sets)
         .flat_map(|s| s.render_data_sources)
+        .filter(|r| r.index_source.index_data.is_some())
         .collect();
 
     (data_blocks, render_index_sources)

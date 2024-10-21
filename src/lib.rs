@@ -62,7 +62,7 @@ fn decode_vertices(blocks: &[DataBlock]) -> Vertices {
     let mut vertices = Vec::new();
     for block in blocks {
         if block.stream.render_type == "Vertex" {
-            let data = decode(&block.data.text);
+            let data = decode(&block.data.as_ref().unwrap().text);
             let mut block_vertices = Vec::new();
             let mut i = 0;
             while i < data.len() {
@@ -96,7 +96,7 @@ fn decode_vertices(blocks: &[DataBlock]) -> Vertices {
 
 fn decode_uvs(block: &DataBlock) -> UVs {
     let mut uvs = Vec::new();
-    let data = decode(&block.data.text);
+    let data = decode(&block.data.as_ref().unwrap().text);
     let mut i = 0;
     while i < data.len() {
         let u = half_to_f32(u16::from_be_bytes([data[i] as u8, data[i + 1] as u8]));
@@ -127,7 +127,7 @@ fn decode_faces(sources: &[RenderDataSource], blocks: &[DataBlock]) -> (Faces, U
         if !["uchar", "ushort"].contains(&index_source.data_type.as_str()) {
             warn!("Unknown data type {} for faces", index_source.data_type);
         }
-        let data = decode(&index_source.index_data.text);
+        let data = decode(&index_source.index_data.as_ref().unwrap().text);
         let mut source_faces = Vec::new();
 
         for i in (0..data.len()).step_by(3) {
