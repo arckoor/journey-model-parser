@@ -1,18 +1,23 @@
 
-from lupa import LuaRuntime
-import os
 import ctypes
+import os
+import platform
+import requests
+
 import bpy  # type: ignore
+from lupa import LuaRuntime
 from mathutils import Vector, Matrix  # type: ignore
 
-
+# Configuration
+VERIFY_SIGNATURE = True  # Verify the library signature. DISABLING THIS IS NOT RECOMMENDED!
 LIB_PATH = ""
 XML_PATH = ""
 TEX_PATH = ""
 DMI_PATH = ""
 EXCLUDED = []
 
-
+# Constants
+VERSION = "0.5.0"
 bl_info = {
     "name": "Journey Level Importer",
     "blender": (2, 80, 0),
@@ -21,7 +26,7 @@ bl_info = {
 }
 xml_cache = {}
 tex_cache = {}
-lib = ctypes.CDLL(LIB_PATH)
+lib = None
 
 
 class ParsedModelData(ctypes.Structure):
@@ -35,9 +40,57 @@ class ParsedModelData(ctypes.Structure):
     ]
 
 
-lib.ffi_parse.restype = ctypes.POINTER(ParsedModelData)
-lib.ffi_parse.argtypes = [ctypes.c_char_p]
-lib.ffi_free.argtypes = [ctypes.POINTER(ParsedModelData)]
+def signature_check(lib_path, sig_path):
+    import gnupg
+    if not os.path.exists(lib_path) or not os.path.exists(sig_path):
+        raise FileNotFoundError(f"Library '{lib_path}' or signature '{sig_path}' file not found!")
+
+    gpg = gnupg.GPG()
+    res = requests.get("https://github.com/arckoor.gpg")
+    if res.status_code != 200:
+        raise Exception("Failed to fetch public key!")
+    p_key = res.text
+    if gpg.import_keys(p_key).count != 1:
+        raise Exception("Failed to import public key!")
+
+    with open(sig_path, "rb") as file:
+        verify = gpg.verify_file(file, lib_path, close_file=True)
+        if not verify.valid or verify.fingerprint != "42F041970716D5F9A42468CE50E6472D9E5513E8":
+            raise Exception("Invalid signature! YOU SHOULD UNDER NO CIRCUMSTANCES RUN THIS FILE!")
+
+
+def load_lib():
+    global lib
+    system = platform.system()
+    lib_path = LIB_PATH
+    sig_path = LIB_PATH
+    if system == "Linux":
+        lib_path = os.path.join(lib_path, "libjourney_model_parser.so")
+        sig_path = os.path.join(sig_path, "libjourney_model_parser.so.sig")
+    elif system == "Windows":
+        lib_path = os.path.join(lib_path, "journey_model_parser.dll")
+        sig_path = os.path.join(sig_path, "journey_model_parser.dll.sig")
+
+    if VERIFY_SIGNATURE:
+        signature_check(lib_path, sig_path)
+    else:
+        pass
+        raise Exception(
+            "You are about to run an untrusted binary. Doing so can put your system at risk." +
+            "\nRe-download the release artifacts from GitHub, and try again. Do not run binaries you received from any other source." +
+            "\nIf you are sure you want to continue, comment out the raise statement the Blender python interpreter stopped at (in load_lib())."
+            )
+
+    lib = ctypes.CDLL(lib_path)
+
+    lib.ffi_version.restype = ctypes.c_char_p
+    lib.ffi_parse.restype = ctypes.POINTER(ParsedModelData)
+    lib.ffi_parse.argtypes = [ctypes.c_char_p]
+    lib.ffi_free.argtypes = [ctypes.POINTER(ParsedModelData)]
+
+    version = lib.ffi_version().decode("utf-8")
+    if version != VERSION:
+        raise Exception(f"Version mismatch! Expected a binary with version {VERSION}, got {version}. Please update your binaries / this script.")
 
 
 def create_cache(path, ext, cache):
@@ -168,6 +221,7 @@ def spawn_xml_model(xml_file, mesh_name, tex, transformation_matrix):
 
 
 if __name__ == "__main__":
+    load_lib()
     create_cache(XML_PATH, ".xml", xml_cache)
     create_cache(TEX_PATH, ".png", tex_cache)
 

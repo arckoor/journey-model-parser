@@ -1,11 +1,15 @@
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_float, c_ulonglong};
 use std::panic;
 use std::path::Path;
+use std::sync::Once;
 
 use tracing::{error, info};
 
 use crate::parse;
+
+static mut VERSION: *const c_char = std::ptr::null();
+static INIT: Once = Once::new();
 
 #[repr(C)]
 pub struct ParsedModelData {
@@ -18,6 +22,18 @@ pub struct ParsedModelData {
     vertices: Vec<f32>,
     uvs: Vec<f32>,
     faces: Vec<u64>,
+}
+
+#[no_mangle]
+pub extern "C" fn ffi_version() -> *const c_char {
+    unsafe {
+        INIT.call_once(|| {
+            let version = env!("CARGO_PKG_VERSION");
+            let version = CString::new(version).unwrap();
+            VERSION = version.into_raw();
+        });
+        VERSION
+    }
 }
 
 #[no_mangle]
