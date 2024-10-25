@@ -31,10 +31,10 @@ fn write_obj(object: &ParsedObject, path: &Path) {
 pub fn parse(xml_file: &Path) -> Vec<ParsedObject> {
     initialize_tracing();
     info!("Parsing file {:?}", xml_file);
-    let (data_blocks, render_index_sources) = structure::parse_xml_file(xml_file);
+    let (data_blocks, render_index_sources, transform) = structure::parse_xml_file(xml_file);
     let mut objects = Vec::new();
     for source in render_index_sources {
-        match ParsedObject::new(&data_blocks, source) {
+        match ParsedObject::new(&data_blocks, source, &transform) {
             Ok(object) => objects.push(object),
             Err(e) => {
                 error!("Failed to parse model data for {:?}: {}", xml_file, e);

@@ -2,26 +2,34 @@ use tracing::warn;
 
 use crate::{
     error::ParseError,
-    structure::{DataBlock, RenderDataSource, RenderIndexSource},
+    structure::{DataBlock, RenderDataSource, RenderIndexSource, Transform},
 };
 
 type Vertices = Vec<[f32; 3]>;
 type UVs = Vec<[f32; 2]>;
 type Faces = Vec<[u64; 3]>;
+type Translation = [f32; 3];
 
 pub struct ParsedObject {
     vertices: Vertices,
     uvs: UVs,
     faces: Faces,
+    translation: Translation,
 }
 
 impl ParsedObject {
-    pub fn new(blocks: &[DataBlock], sources: RenderDataSource) -> Result<Self, ParseError> {
+    pub fn new(
+        blocks: &[DataBlock],
+        sources: RenderDataSource,
+        transform: &Transform,
+    ) -> Result<Self, ParseError> {
         let (vertices, uvs, faces) = Self::decode(blocks, sources)?;
+        let translation = Self::decode_translation(transform)?;
         Ok(Self {
             vertices,
             uvs,
             faces,
+            translation,
         })
     }
 
@@ -49,11 +57,12 @@ impl ParsedObject {
         obj
     }
 
-    pub fn to_ffi(&self) -> (Vec<f32>, Vec<f32>, Vec<u64>) {
+    pub fn to_ffi(&self) -> (Vec<f32>, Vec<f32>, Vec<u64>, Vec<f32>) {
         (
             self.vertices.iter().copied().flatten().collect(),
             self.uvs.iter().copied().flatten().collect(),
             self.faces.iter().copied().flatten().collect(),
+            self.translation.to_vec(),
         )
     }
 
@@ -157,6 +166,24 @@ impl ParsedObject {
             warn!("Face count does not match face data");
         }
         Ok(faces)
+    }
+
+    fn decode_translation(transform: &Transform) -> Result<Translation, ParseError> {
+        let data = transform
+            .matrix
+            .split_whitespace()
+            .map(|s| {
+                s.parse::<f32>()
+                    .map_err(|e| ParseError::new(&format!("Failed to decode matrix: {e}")))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if data.len() != 16 {
+            return Err(ParseError::new("Invalid matrix length"));
+        }
+        let x = data[12];
+        let y = data[13];
+        let z = data[14];
+        Ok([x, y, z])
     }
 
     fn read(data: &str) -> Result<Vec<u32>, ParseError> {

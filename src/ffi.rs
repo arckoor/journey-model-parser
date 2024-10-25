@@ -19,12 +19,14 @@ pub struct ParsedModelData {
     vertices_len_ptr: *const usize,
     uvs_len_ptr: *const usize,
     faces_len_ptr: *const usize,
+    translation_ptr: *const c_float,
     vertices: Vec<f32>,
     uvs: Vec<f32>,
     faces: Vec<u64>,
     vertices_len: Vec<usize>,
     uvs_len: Vec<usize>,
     faces_len: Vec<usize>,
+    translation: Vec<f32>,
 }
 
 #[no_mangle]
@@ -57,8 +59,10 @@ pub extern "C" fn ffi_parse(xml_file_path: *const c_char) -> *mut ParsedModelDat
     let mut uvs_len = Vec::new();
     let mut faces_len = Vec::new();
 
+    let mut translation = Vec::new();
+
     for object in &objects {
-        let (object_vertices, object_uvs, object_faces) = object.to_ffi();
+        let (object_vertices, object_uvs, object_faces, trans) = object.to_ffi();
 
         vertices_len.push(object_vertices.len());
         uvs_len.push(object_uvs.len());
@@ -67,6 +71,8 @@ pub extern "C" fn ffi_parse(xml_file_path: *const c_char) -> *mut ParsedModelDat
         vertices_flat.extend(object_vertices);
         uvs_flat.extend(object_uvs);
         faces_flat.extend(object_faces);
+
+        translation = trans;
     }
 
     info!(
@@ -85,12 +91,14 @@ pub extern "C" fn ffi_parse(xml_file_path: *const c_char) -> *mut ParsedModelDat
         vertices_len_ptr: vertices_len.as_ptr(),
         uvs_len_ptr: uvs_len.as_ptr(),
         faces_len_ptr: faces_len.as_ptr(),
+        translation_ptr: translation.as_ptr(),
         vertices: vertices_flat,
         uvs: uvs_flat,
         faces: faces_flat,
         vertices_len,
         uvs_len,
         faces_len,
+        translation,
     });
 
     Box::into_raw(result)

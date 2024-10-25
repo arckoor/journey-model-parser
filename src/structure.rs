@@ -1,8 +1,9 @@
-use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
+use std::{fmt, fs::File};
 
-use serde::Deserialize;
+use serde::de::MapAccess;
+use serde::{de::Visitor, Deserialize, Deserializer};
 use serde_xml_rs::from_reader;
 use tracing::warn;
 
@@ -37,6 +38,8 @@ pub struct Library {
     pub data_blocks: Vec<DataBlock>,
     #[serde(rename = "SEGMENTSET", default)]
     pub segment_sets: Vec<SegmentSet>,
+    #[serde(rename = "ROOTNODE", default)]
+    pub root_node: Option<RootNode>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -103,7 +106,79 @@ pub struct RenderStream {
     pub data_block: String,
 }
 
-pub fn parse_xml_file(path: &Path) -> (Vec<DataBlock>, Vec<RenderDataSource>) {
+#[derive(Clone)]
+pub struct RootNode {
+    pub render_nodes: Vec<RenderNode>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct RenderNode {
+    #[serde(rename = "TRANSFORM")]
+    pub transform: Transform,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct Transform {
+    #[serde(rename = "$value")]
+    pub matrix: String,
+}
+
+impl<'de> Deserialize<'de> for RootNode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct RootNodeVisitor;
+
+        impl<'de> Visitor<'de> for RootNodeVisitor {
+            type Value = RootNode;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("struct RootNode")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<RootNode, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut render_nodes = Vec::new();
+
+                while let Some(key) = map.next_key::<String>()? {
+                    if key == "RENDERNODE" {
+                        let node: RenderNode = map.next_value()?;
+                        render_nodes.push(node);
+                    } else {
+                        let _: serde::de::IgnoredAny = map.next_value()?;
+                    }
+                }
+
+                Ok(RootNode { render_nodes })
+            }
+        }
+
+        deserializer.deserialize_map(RootNodeVisitor)
+    }
+}
+
+fn get_transform(pssg: &PssgFile) -> Transform {
+    if let Some(lib) = pssg
+        .database
+        .libraries
+        .iter()
+        .find(|l| l.library_type == "NODE")
+    {
+        if let Some(root_node) = lib.root_node.as_ref() {
+            if root_node.render_nodes.len() == 1 {
+                return root_node.render_nodes[0].transform.clone();
+            }
+        }
+    }
+    Transform {
+        matrix: "1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1".to_string(),
+    }
+}
+
+pub fn parse_xml_file(path: &Path) -> (Vec<DataBlock>, Vec<RenderDataSource>, Transform) {
     let pssg_file: PssgFile = {
         let file = File::open(path).expect("Failed to open file");
         let reader = BufReader::new(file);
@@ -132,6 +207,7 @@ pub fn parse_xml_file(path: &Path) -> (Vec<DataBlock>, Vec<RenderDataSource>) {
         .collect();
 
     let render_index_sources = pssg_file
+        .clone()
         .database
         .libraries
         .into_iter()
@@ -141,6 +217,8 @@ pub fn parse_xml_file(path: &Path) -> (Vec<DataBlock>, Vec<RenderDataSource>) {
         .filter(|r| r.index_source.index_data.is_some())
         .collect::<Vec<_>>();
 
+    let transform = get_transform(&pssg_file);
+
     if source_count != render_index_sources.len() {
         warn!(
             "Expected {} RENDERDATASOURCE entries, found {}",
@@ -149,5 +227,5 @@ pub fn parse_xml_file(path: &Path) -> (Vec<DataBlock>, Vec<RenderDataSource>) {
         );
     }
 
-    (data_blocks, render_index_sources)
+    (data_blocks, render_index_sources, transform)
 }

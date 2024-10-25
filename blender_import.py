@@ -17,7 +17,7 @@ DMI_PATH = ""
 EXCLUDED = []
 
 # Constants
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 bl_info = {
     "name": "Journey Level Importer",
     "blender": (2, 80, 0),
@@ -38,6 +38,7 @@ class ParsedModelData(ctypes.Structure):
         ("vertices_len_ptr", ctypes.POINTER(ctypes.c_size_t)),
         ("uvs_len_ptr", ctypes.POINTER(ctypes.c_size_t)),
         ("faces_len_ptr", ctypes.POINTER(ctypes.c_size_t)),
+        ("translation_ptr", ctypes.POINTER(ctypes.c_float)),
     ]
 
 
@@ -123,7 +124,7 @@ def traverse_lua_table(lua_table):
         if isinstance(value, (lua_table.__class__,)):
             d = dict(value)
             mesh_name = d["Mesh"]
-            if mesh_name.replace("P_", "") in EXCLUDED:
+            if mesh_name.replace("P_", "") in EXCLUDED or mesh_name in EXCLUDED:
                 continue
 
             matrix = None
@@ -147,7 +148,7 @@ def traverse_lua_table(lua_table):
                 if not shader_params:
                     tex = "ClothAtlas"
                 else:
-                    accepted_keys = ["texColor", "texCham", "tex"]
+                    accepted_keys = ["texColor", "texCham", "tex", "textureAtlasA", "textureAtlasB"]
                     params = {
                         entry["ParamName"]: entry["ParamVal"]
                         for entry in d["ShaderParams"].values()
@@ -187,20 +188,21 @@ def spawn_models(xml_name, mesh_name, tex, transformation_matrix):
             uvs = [uvs_flat[i:i+2] for i in range(0, len(uvs_flat), 2)]
             faces = [faces_flat[i:i+3] for i in range(0, len(faces_flat), 3)]
 
+            translation_matrix = Matrix.Translation(Vector(result.translation_ptr[i:i+3]))
+
             print(f"Spawning model {i+1} of {result.object_count} for {mesh_name}")
-            spawn_xml_model(vertices, uvs, faces, mesh_name, tex, transformation_matrix)
+            spawn_xml_model(vertices, uvs, faces, mesh_name, tex, transformation_matrix, translation_matrix)
     finally:
         lib.ffi_free(result)
 
 
-def spawn_xml_model(vertices, uvs, faces, mesh_name, tex, transformation_matrix):
+def spawn_xml_model(vertices, uvs, faces, mesh_name, tex, transformation_matrix, translation_matrix):
     if not vertices or not faces:
         print(f"Invalid xml data for model:{mesh_name}! V:{len(vertices)} F:{len(faces)}")
         return
 
     mesh = bpy.data.meshes.new(name=mesh_name)
     mesh.from_pydata(vertices, [], faces)
-    mesh.update()
 
     mesh.uv_layers.new(name="UVMap")
     uv_layer = mesh.uv_layers.active.data
@@ -210,6 +212,7 @@ def spawn_xml_model(vertices, uvs, faces, mesh_name, tex, transformation_matrix)
             vert_idx = mesh.loops[loop_idx].vertex_index
             uv_layer[loop_idx].uv = uvs[vert_idx]
 
+    mesh.transform(translation_matrix)
     mesh.update()
 
     obj = bpy.data.objects.new(mesh_name, mesh)
