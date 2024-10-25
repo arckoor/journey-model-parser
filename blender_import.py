@@ -17,7 +17,7 @@ DMI_PATH = ""
 EXCLUDED = []
 
 # Constants
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 bl_info = {
     "name": "Journey Level Importer",
     "blender": (2, 80, 0),
@@ -31,12 +31,13 @@ lib = None
 
 class ParsedModelData(ctypes.Structure):
     _fields_ = [
+        ("object_count", ctypes.c_size_t),
         ("vertices_ptr", ctypes.POINTER(ctypes.c_float)),
-        ("vertices_len", ctypes.c_size_t),
         ("uvs_ptr", ctypes.POINTER(ctypes.c_float)),
-        ("uvs_len", ctypes.c_size_t),
         ("faces_ptr", ctypes.POINTER(ctypes.c_ulonglong)),
-        ("faces_len", ctypes.c_size_t),
+        ("vertices_len_ptr", ctypes.POINTER(ctypes.c_size_t)),
+        ("uvs_len_ptr", ctypes.POINTER(ctypes.c_size_t)),
+        ("faces_len_ptr", ctypes.POINTER(ctypes.c_size_t)),
     ]
 
 
@@ -107,7 +108,7 @@ def create_cache(path, ext, cache):
 
 def find_from_cache(name, cache):
     for filename, full_path in cache.items():
-        if name in filename:
+        if name == filename:
             return full_path
 
 
@@ -161,29 +162,38 @@ def traverse_lua_table(lua_table):
             tex = find_tex_from_tex_name(tex)
             if xml_name is not None:
                 print(f"Spawning {xml_name} for {mesh_name} with {tex}")
-                spawn_xml_model(xml_name, mesh_name, tex, matrix)
+                spawn_models(xml_name, mesh_name, tex, matrix)
 
 
-def spawn_xml_model(xml_file, mesh_name, tex, transformation_matrix):
-    result = lib.ffi_parse(xml_file.encode("utf-8"))
+def spawn_models(xml_name, mesh_name, tex, transformation_matrix):
+    result = lib.ffi_parse(xml_name.encode("utf-8"))
 
     if not result:
-        print(f"Failed to parse {xml_file}")
+        print(f"Failed to parse {xml_name}")
         return
 
     result = result.contents
+    try:
+        for i in range(result.object_count):
+            vertices_start = sum(result.vertices_len_ptr[:i])
+            uvs_start = sum(result.uvs_len_ptr[:i])
+            faces_start = sum(result.faces_len_ptr[:i])
 
-    vertices_flat = [round(result.vertices_ptr[i], 4) for i in range(result.vertices_len)]
-    vertices = [Vector((vertices_flat[i], vertices_flat[i + 1], vertices_flat[i + 2])) for i in range(0, len(vertices_flat), 3)]
+            vertices_flat = [round(result.vertices_ptr[i], 4) for i in range(vertices_start, vertices_start + result.vertices_len_ptr[i])]
+            uvs_flat = [round(result.uvs_ptr[i], 4) for i in range(uvs_start, uvs_start + result.uvs_len_ptr[i])]
+            faces_flat = [result.faces_ptr[i] for i in range(faces_start, faces_start + result.faces_len_ptr[i])]
 
-    uvs_flat = [round(result.uvs_ptr[i], 4) for i in range(result.uvs_len)]
-    uvs = [(uvs_flat[i], uvs_flat[i + 1]) for i in range(0, len(uvs_flat), 2)]
+            vertices = [Vector(vertices_flat[i:i+3]) for i in range(0, len(vertices_flat), 3)]
+            uvs = [uvs_flat[i:i+2] for i in range(0, len(uvs_flat), 2)]
+            faces = [faces_flat[i:i+3] for i in range(0, len(faces_flat), 3)]
 
-    faces_flat = [result.faces_ptr[i] for i in range(result.faces_len)]
-    faces = [(faces_flat[i], faces_flat[i + 1], faces_flat[i + 2]) for i in range(0, len(faces_flat), 3)]
+            print(f"Spawning model {i+1} of {result.object_count} for {mesh_name}")
+            spawn_xml_model(vertices, uvs, faces, mesh_name, tex, transformation_matrix)
+    finally:
+        lib.ffi_free(result)
 
-    lib.ffi_free(result)
 
+def spawn_xml_model(vertices, uvs, faces, mesh_name, tex, transformation_matrix):
     if not vertices or not faces:
         print(f"Invalid xml data for model:{mesh_name}! V:{len(vertices)} F:{len(faces)}")
         return

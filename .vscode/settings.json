@@ -24,6 +24,8 @@
 		"repr",
 		"rustfmt",
 		"rustup",
+		"Skinnable",
+		"TYPEINFO",
 		"ulonglong"
 	]
 }

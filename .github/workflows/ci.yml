@@ -35,9 +35,14 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         build_flags: ["", "--release"]
+        include:
+          - os: windows-latest
+            target: "--target x86_64-pc-windows-gnu"
+          - os: ubuntu-latest
+            target: ""
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Generate library
-        run: cargo build ${{ matrix.build_flags }}
+        run: cargo build ${{ matrix.build_flags }} ${{ matrix.target }}

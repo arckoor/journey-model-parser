@@ -29,7 +29,6 @@ In the shell run this command: `pip install lupa python-gnupg`. After `pip` comp
 Verify functionality by running `from lupa import LuaRuntime` and `import gnupg` in the Blender terminal.
 
 ### Other packages
-
 For increased security you should also install GnuPG on your system. The Windows installer can be found [here](https://gpg4win.org/index.html), and every Linux distribution should provide this package.
 
 ## Why GnuPG and python-gnupg?

@@ -4,6 +4,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 use serde_xml_rs::from_reader;
+use tracing::warn;
 
 #[derive(Deserialize, Clone)]
 #[serde(rename = "PSSGFILE")]
@@ -14,8 +15,18 @@ pub struct PssgFile {
 
 #[derive(Deserialize, Clone)]
 pub struct PssgDatabase {
+    #[serde(rename = "TYPEINFO")]
+    pub type_info: Vec<TypeInfo>,
     #[serde(rename = "LIBRARY")]
     pub libraries: Vec<Library>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct TypeInfo {
+    #[serde(rename = "typeName")]
+    pub type_name: String,
+    #[serde(rename = "typeCount")]
+    pub type_count: usize,
 }
 
 #[derive(Deserialize, Clone)]
@@ -99,6 +110,17 @@ pub fn parse_xml_file(path: &Path) -> (Vec<DataBlock>, Vec<RenderDataSource>) {
         from_reader(reader).expect("Failed to parse XML")
     };
 
+    let source_count = pssg_file
+        .database
+        .type_info
+        .iter()
+        .find(|t| t.type_name == "RENDERDATASOURCE")
+        .unwrap_or(&TypeInfo {
+            type_name: "RENDERDATASOURCE".to_string(),
+            type_count: 0,
+        })
+        .type_count;
+
     let data_blocks = pssg_file
         .clone()
         .database
@@ -117,7 +139,15 @@ pub fn parse_xml_file(path: &Path) -> (Vec<DataBlock>, Vec<RenderDataSource>) {
         .flat_map(|l| l.segment_sets)
         .flat_map(|s| s.render_data_sources)
         .filter(|r| r.index_source.index_data.is_some())
-        .collect();
+        .collect::<Vec<_>>();
+
+    if source_count != render_index_sources.len() {
+        warn!(
+            "Expected {} RENDERDATASOURCE entries, found {}",
+            source_count,
+            render_index_sources.len()
+        );
+    }
 
     (data_blocks, render_index_sources)
 }

@@ -1,10 +1,9 @@
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_float, c_ulonglong};
-use std::panic;
 use std::path::Path;
 use std::sync::Once;
 
-use tracing::{error, info};
+use tracing::info;
 
 use crate::parse;
 
@@ -13,15 +12,19 @@ static INIT: Once = Once::new();
 
 #[repr(C)]
 pub struct ParsedModelData {
+    object_count: usize,
     vertices_ptr: *const c_float,
-    vertices_len: usize,
     uvs_ptr: *const c_float,
-    uvs_len: usize,
     faces_ptr: *const c_ulonglong,
-    faces_len: usize,
+    vertices_len_ptr: *const usize,
+    uvs_len_ptr: *const usize,
+    faces_len_ptr: *const usize,
     vertices: Vec<f32>,
     uvs: Vec<f32>,
     faces: Vec<u64>,
+    vertices_len: Vec<usize>,
+    uvs_len: Vec<usize>,
+    faces_len: Vec<usize>,
 }
 
 #[no_mangle]
@@ -40,42 +43,57 @@ pub extern "C" fn ffi_version() -> *const c_char {
 pub extern "C" fn ffi_parse(xml_file_path: *const c_char) -> *mut ParsedModelData {
     let c_str = unsafe { CStr::from_ptr(xml_file_path) };
     let xml_file = Path::new(c_str.to_str().unwrap());
-    let result = panic::catch_unwind(|| {
-        let (vertices, uvs, faces) = parse(xml_file);
+    let objects = parse(xml_file);
 
-        let vertices_flat: Vec<f32> = vertices.into_iter().flatten().collect();
-        let uvs_flat: Vec<f32> = uvs.into_iter().flatten().collect();
-        let faces_flat: Vec<u64> = faces.into_iter().flatten().collect();
+    if objects.is_empty() {
+        return std::ptr::null_mut();
+    }
 
-        info!(
-            "Packing {} vertices, {} uvs, and {} faces",
-            vertices_flat.len(),
-            uvs_flat.len(),
-            faces_flat.len()
-        );
+    let mut vertices_flat = Vec::new();
+    let mut uvs_flat = Vec::new();
+    let mut faces_flat = Vec::new();
 
-        let result = Box::new(ParsedModelData {
-            vertices_ptr: vertices_flat.as_ptr() as *const c_float,
-            vertices_len: vertices_flat.len(),
-            uvs_ptr: uvs_flat.as_ptr() as *const c_float,
-            uvs_len: uvs_flat.len(),
-            faces_ptr: faces_flat.as_ptr() as *const c_ulonglong,
-            faces_len: faces_flat.len(),
-            vertices: vertices_flat,
-            uvs: uvs_flat,
-            faces: faces_flat,
-        });
+    let mut vertices_len = Vec::new();
+    let mut uvs_len = Vec::new();
+    let mut faces_len = Vec::new();
 
-        Box::into_raw(result)
+    for object in &objects {
+        let (object_vertices, object_uvs, object_faces) = object.to_ffi();
+
+        vertices_len.push(object_vertices.len());
+        uvs_len.push(object_uvs.len());
+        faces_len.push(object_faces.len());
+
+        vertices_flat.extend(object_vertices);
+        uvs_flat.extend(object_uvs);
+        faces_flat.extend(object_faces);
+    }
+
+    info!(
+        "Packing {} vertices, {} uvs, {} faces from {} object(s)",
+        vertices_flat.len(),
+        uvs_flat.len(),
+        faces_flat.len(),
+        objects.len()
+    );
+
+    let result = Box::new(ParsedModelData {
+        vertices_ptr: vertices_flat.as_ptr(),
+        uvs_ptr: uvs_flat.as_ptr(),
+        faces_ptr: faces_flat.as_ptr(),
+        object_count: objects.len(),
+        vertices_len_ptr: vertices_len.as_ptr(),
+        uvs_len_ptr: uvs_len.as_ptr(),
+        faces_len_ptr: faces_len.as_ptr(),
+        vertices: vertices_flat,
+        uvs: uvs_flat,
+        faces: faces_flat,
+        vertices_len,
+        uvs_len,
+        faces_len,
     });
 
-    match result {
-        Ok(ptr) => ptr,
-        Err(_) => {
-            error!("Failed to parse model data for {:?}", xml_file);
-            std::ptr::null_mut()
-        }
-    }
+    Box::into_raw(result)
 }
 
 #[no_mangle]
