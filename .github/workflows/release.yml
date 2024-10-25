@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  id-token: write
+  contents: read
+  attestations: write
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: ""
+            artifact_name: libjourney_model_parser.so
+            artifact_path: target/release/libjourney_model_parser.so
+          - os: windows-latest
+            target: "--target x86_64-pc-windows-gnu"
+            artifact_name: journey_model_parser.dll
+            artifact_path: target/x86_64-pc-windows-gnu/release/journey_model_parser.dll
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Generate library
+        run: cargo build --release ${{ matrix.target }}
+      - name: Generate attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: ${{ matrix.artifact_path }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_path }}
+          retention-days: 1
