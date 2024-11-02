@@ -17,7 +17,7 @@ DMI_PATH = ""
 EXCLUDED = []
 
 # Constants
-VERSION = "0.7.0"
+VERSION = "0.7.1"
 bl_info = {
     "name": "Journey Level Importer",
     "blender": (2, 80, 0),
@@ -34,7 +34,7 @@ class ParsedModelData(ctypes.Structure):
         ("object_count", ctypes.c_size_t),
         ("vertices_ptr", ctypes.POINTER(ctypes.c_float)),
         ("uvs_ptr", ctypes.POINTER(ctypes.c_float)),
-        ("faces_ptr", ctypes.POINTER(ctypes.c_ulonglong)),
+        ("faces_ptr", ctypes.POINTER(ctypes.c_uint32)),
         ("vertices_len_ptr", ctypes.POINTER(ctypes.c_size_t)),
         ("uvs_len_ptr", ctypes.POINTER(ctypes.c_size_t)),
         ("faces_len_ptr", ctypes.POINTER(ctypes.c_size_t)),
@@ -146,13 +146,13 @@ def traverse_lua_table(lua_table):
             if isinstance(d["ShaderParams"], (lua_table.__class__,)):
                 shader_params = dict(d["ShaderParams"])
                 if not shader_params:
-                    tex = "ClothAtlas"
+                    tex = "ClothAtlas"  # Change me to ClothAtlasGlow to get glowing cloth!
                 else:
                     accepted_keys = ["texColor", "texCham", "tex", "textureAtlasA", "textureAtlasB"]
                     params = {
                         entry["ParamName"]: entry["ParamVal"]
                         for entry in d["ShaderParams"].values()
-                        if entry["ParamName"] in accepted_keys
+                        if entry["ParamName"] in accepted_keys and entry["ParamVal"] != "Blank"
                     }
                     tex = next((params[key] for key in accepted_keys if key in params), None)
 
@@ -188,7 +188,7 @@ def spawn_models(xml_name, mesh_name, tex, transformation_matrix):
             uvs = [uvs_flat[i:i+2] for i in range(0, len(uvs_flat), 2)]
             faces = [faces_flat[i:i+3] for i in range(0, len(faces_flat), 3)]
 
-            translation_matrix = Matrix.Translation(Vector(result.translation_ptr[i:i+3]))
+            translation_matrix = Matrix.Translation(Vector(result.translation_ptr[:3]))
 
             print(f"Spawning model {i+1} of {result.object_count} for {mesh_name}")
             spawn_xml_model(vertices, uvs, faces, mesh_name, tex, transformation_matrix, translation_matrix)

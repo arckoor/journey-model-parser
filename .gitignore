@@ -1,7 +1,9 @@
 /target
-/test-data
+/game-data
 *.xml
 *.obj
 *.so
 *.dll
 *.sig
+*.py
+!blender_import.py

@@ -7,7 +7,7 @@ use crate::{
 
 type Vertices = Vec<[f32; 3]>;
 type UVs = Vec<[f32; 2]>;
-type Faces = Vec<[u64; 3]>;
+type Faces = Vec<[u32; 3]>;
 type Translation = [f32; 3];
 
 pub struct ParsedObject {
@@ -57,7 +57,7 @@ impl ParsedObject {
         obj
     }
 
-    pub fn to_ffi(&self) -> (Vec<f32>, Vec<f32>, Vec<u64>, Vec<f32>) {
+    pub fn to_ffi(&self) -> (Vec<f32>, Vec<f32>, Vec<u32>, Vec<f32>) {
         (
             self.vertices.iter().copied().flatten().collect(),
             self.uvs.iter().copied().flatten().collect(),
@@ -95,22 +95,16 @@ impl ParsedObject {
     }
 
     fn decode_vertices(block: &DataBlock) -> Result<Vertices, ParseError> {
-        let data = Self::read(
+        let data: Vec<f32> = Self::read(
             &block
                 .data
                 .as_ref()
                 .ok_or_else(|| ParseError::new("Missing vertex block data"))?
                 .text,
+            "float",
         )?;
-        let mut vertices = Vec::new();
-        let mut i = 0;
-        while i < data.len() {
-            let x = Self::bytes_to_f32(&data[i..i + 4]);
-            let y = Self::bytes_to_f32(&data[i + 4..i + 8]);
-            let z = Self::bytes_to_f32(&data[i + 8..i + 12]);
-            vertices.push([x, y, z]);
-            i += 12;
-        }
+
+        let vertices: Vec<[f32; 3]> = data.chunks(3).map(|c| [c[0], c[1], c[2]]).collect();
         if block.element_count != vertices.len() {
             return Err(ParseError::new("Vertex count does not match element count"));
         }
@@ -118,65 +112,66 @@ impl ParsedObject {
     }
 
     fn decode_uvs(block: &DataBlock) -> Result<UVs, ParseError> {
-        let mut uvs = Vec::new();
-        let data = Self::read(
+        let data: Vec<f32> = Self::read(
             &block
                 .data
                 .as_ref()
                 .ok_or_else(|| ParseError::new("Missing uv block data"))?
                 .text,
+            "half",
         )?;
-        let mut i = 0;
-        while i < data.len() {
-            let u = Self::half_to_f32(u16::from_be_bytes([data[i] as u8, data[i + 1] as u8]));
-            let v = Self::half_to_f32(u16::from_be_bytes([data[i + 2] as u8, data[i + 3] as u8]));
-            uvs.push([u, v]);
-            if block.stream.data_type == "half2" {
-                i += 4;
-            } else if block.stream.data_type == "half4" {
-                i += 8;
-            }
-        }
+
+        let uvs: Vec<[f32; 2]> = if block.stream.data_type == "half2" {
+            data.chunks(2).map(|c| [c[0], c[1]]).collect()
+        } else {
+            data.chunks(4).map(|c| [c[0], c[1]]).collect()
+        };
+
         if block.element_count != uvs.len() {
-            return Err(ParseError::new("UV count does not match element count"));
+            return Err(ParseError::new(&format!(
+                "UV count {} does not match element count {}",
+                uvs.len(),
+                block.element_count
+            )));
         }
         Ok(uvs)
     }
 
     fn decode_faces(source: &RenderIndexSource) -> Result<Faces, ParseError> {
-        if !["uchar", "ushort"].contains(&source.data_type.as_str()) {
-            warn!("Unknown data type {} for faces", source.data_type);
-        }
         let data = Self::read(
             &source
                 .index_data
                 .as_ref()
                 .ok_or_else(|| ParseError::new("Missing faces block data"))?
                 .text,
+            &source.data_type,
         )?;
         let mut faces = Vec::new();
 
         for i in (0..data.len()).step_by(3) {
-            faces.push([data[i] as u64, data[i + 1] as u64, data[i + 2] as u64]);
+            faces.push([data[i], data[i + 1], data[i + 2]]);
         }
         if source.count % 3 != 0 {
-            warn!("Face count is not a multiple of 3");
+            warn!(
+                "{}",
+                format!("Face count ({}) is not a multiple of 3", source.count)
+            );
         }
         if source.count / 3 != faces.len() {
-            warn!("Face count does not match face data");
+            warn!(
+                "{}",
+                format!(
+                    "Face count ({}) does not match face data ({})",
+                    source.count / 3,
+                    faces.len()
+                )
+            );
         }
         Ok(faces)
     }
 
     fn decode_translation(transform: &Transform) -> Result<Translation, ParseError> {
-        let data = transform
-            .matrix
-            .split_whitespace()
-            .map(|s| {
-                s.parse::<f32>()
-                    .map_err(|e| ParseError::new(&format!("Failed to decode matrix: {e}")))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let data: Vec<f32> = Self::read(&transform.matrix, "float")?;
         if data.len() != 16 {
             return Err(ParseError::new("Invalid matrix length"));
         }
@@ -186,31 +181,89 @@ impl ParsedObject {
         Ok([x, y, z])
     }
 
-    fn read(data: &str) -> Result<Vec<u32>, ParseError> {
-        let v = if data
+    fn read<T>(data: &str, data_type: &str) -> Result<Vec<T>, ParseError>
+    where
+        T: From<u8> + From<u16> + std::str::FromStr,
+        <T as std::str::FromStr>::Err: std::fmt::Display,
+    {
+        if data
             .chars()
-            .any(|c| !c.is_ascii_digit() && !c.is_whitespace())
+            .all(|c| c.is_ascii_hexdigit() || c.is_whitespace())
+            && data.split_whitespace().all(|s| {
+                s.len() == 2
+                    && !((s.len() > 1
+                        && s.starts_with("0")
+                        && s.chars().all(|c| c.is_ascii_digit()))
+                        && (data.contains("e+") || data.contains("e-")))
+            })
         {
-            data.split_whitespace()
-                .flat_map(|s| {
-                    (0..s.len()).step_by(2).map(|i| {
-                        u8::from_str_radix(&s[i..i + 2], 16)
-                            .map_err(|e| ParseError::new(&format!("Failed to decode hex: {e}")))
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .map(|v| v as u32)
-                .collect()
-        } else {
-            data.split_whitespace()
-                .map(|s| {
-                    s.parse::<u32>()
-                        .map_err(|e| ParseError::new(&format!("Failed to decode decimal: {e}")))
-                })
-                .collect::<Result<Vec<_>, _>>()?
+            return Self::read_hex(data, data_type);
+        }
+        Self::read_decimal(data)
+    }
+
+    fn read_hex<T>(data: &str, data_type: &str) -> Result<Vec<T>, ParseError>
+    where
+        T: From<u8> + From<u16> + std::str::FromStr,
+        <T as std::str::FromStr>::Err: std::fmt::Display,
+    {
+        let stride = match data_type {
+            "uchar" => 1,
+            "ushort" | "half" => 2,
+            "float" => 4,
+            _ => return Err(ParseError::new(&format!("Unknown data type {}", data_type))),
         };
-        Ok(v)
+
+        let bytes = data
+            .split_whitespace()
+            .map(|s| {
+                u8::from_str_radix(s, 16)
+                    .map_err(|e| ParseError::new(&format!("Failed to decode hex: {e}")))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        bytes
+            .chunks(stride)
+            .map(|chunk| match (stride, data_type) {
+                (1, "uchar") => Ok(T::from(chunk[0])),
+                (2, "ushort") => {
+                    let arr = <[u8; 2]>::try_from(chunk)
+                        .map_err(|_| ParseError::new("Invalid length for u16"))?;
+                    Ok(T::from(u16::from_be_bytes(arr)))
+                }
+                (2, "half") => {
+                    let arr = <[u8; 2]>::try_from(chunk)
+                        .map_err(|_| ParseError::new("Invalid length for u16"))?;
+
+                    let f = Self::half_to_f32(u16::from_be_bytes(arr));
+                    f.to_string()
+                        .parse::<T>()
+                        .map_err(|_| ParseError::new("Failed to convert half to target type"))
+                }
+                (4, "float") => {
+                    let arr = <[u8; 4]>::try_from(chunk)
+                        .map_err(|_| ParseError::new("Invalid length for f32"))?;
+                    let f = f32::from_be_bytes(arr);
+                    f.to_string()
+                        .parse::<T>()
+                        .map_err(|_| ParseError::new("Failed to convert f32 to target type"))
+                }
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
+    fn read_decimal<T>(data: &str) -> Result<Vec<T>, ParseError>
+    where
+        T: std::str::FromStr,
+        <T as std::str::FromStr>::Err: std::fmt::Display,
+    {
+        data.split_whitespace()
+            .map(|s| {
+                s.parse::<T>()
+                    .map_err(|e| ParseError::new(&format!("Failed to decode decimal data: {e}")))
+            })
+            .collect::<Result<Vec<_>, _>>()
     }
 
     fn half_to_f32(half: u16) -> f32 {
@@ -226,14 +279,5 @@ impl ParsedObject {
         let bits = ((sign as u32) << 31) | ((exp as u32) << 23) | ((mantissa as u32) << 13);
 
         f32::from_bits(bits)
-    }
-
-    fn bytes_to_f32(bytes: &[u32]) -> f32 {
-        f32::from_be_bytes([
-            bytes[0] as u8,
-            bytes[1] as u8,
-            bytes[2] as u8,
-            bytes[3] as u8,
-        ])
     }
 }

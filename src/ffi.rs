@@ -1,5 +1,5 @@
 use std::ffi::{CStr, CString};
-use std::os::raw::{c_char, c_float, c_ulonglong};
+use std::os::raw::{c_char, c_float, c_uint};
 use std::path::Path;
 use std::sync::Once;
 
@@ -15,14 +15,14 @@ pub struct ParsedModelData {
     object_count: usize,
     vertices_ptr: *const c_float,
     uvs_ptr: *const c_float,
-    faces_ptr: *const c_ulonglong,
+    faces_ptr: *const c_uint,
     vertices_len_ptr: *const usize,
     uvs_len_ptr: *const usize,
     faces_len_ptr: *const usize,
     translation_ptr: *const c_float,
     vertices: Vec<f32>,
     uvs: Vec<f32>,
-    faces: Vec<u64>,
+    faces: Vec<u32>,
     vertices_len: Vec<usize>,
     uvs_len: Vec<usize>,
     faces_len: Vec<usize>,

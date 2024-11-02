@@ -7,6 +7,7 @@
 		"DATABLOCKSTREAM",
 		"dofile",
 		"gnupg",
+		"hexdigit",
 		"idname",
 		"INDEXSOURCEDATA",
 		"libjourney",
@@ -27,6 +28,7 @@
 		"rustfmt",
 		"rustup",
 		"Skinnable",
+		"texconv",
 		"TYPEINFO",
 		"ulonglong"
 	]
