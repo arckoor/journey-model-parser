@@ -1,6 +1,8 @@
+mod entity;
 mod error;
 mod ffi;
 mod object;
+mod parse;
 mod structure;
 
 use std::fs::File;
@@ -8,9 +10,11 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::Once;
 
-use tracing::{error, info};
+use entity::Entity;
+use error::ParseError;
+use tracing::info;
 
-use object::ParsedObject;
+use object::Object;
 
 static INIT: Once = Once::new();
 
@@ -22,36 +26,33 @@ fn initialize_tracing() {
     });
 }
 
-fn write_obj(object: &ParsedObject, path: &Path) {
+fn write_obj(object: &Object, path: &Path) {
     let mut file = File::create(path).expect("Failed to create file");
     file.write_all(object.to_obj().as_bytes())
         .expect("Failed to write to file");
 }
 
-pub fn parse(xml_file: &Path) -> Vec<ParsedObject> {
+pub fn parse(xml_file: &Path) -> Result<Entity, ParseError> {
     initialize_tracing();
     info!("Parsing file {:?}", xml_file);
-    let (data_blocks, render_index_sources, transform) = structure::parse_xml_file(xml_file);
-    let mut objects = Vec::new();
-    for source in render_index_sources {
-        match ParsedObject::new(&data_blocks, source, &transform) {
-            Ok(object) => objects.push(object),
-            Err(e) => {
-                error!("Failed to parse model data for {:?}: {}", xml_file, e);
-                return Vec::new();
-            }
-        }
-    }
-    objects
+    let (data_blocks, render_index_sources, root_node) = structure::parse_xml_file(xml_file);
+    Entity::new(data_blocks, render_index_sources, root_node)
 }
 
 pub fn convert_file(xml_file: &Path) {
-    let objects = parse(xml_file);
+    let entity = parse(xml_file);
 
-    let path = xml_file.file_stem().unwrap().to_str().unwrap();
+    if let Err(e) = entity {
+        info!("Failed to parse file: {:?}", e);
+        return;
+    }
 
-    for (i, object) in objects.iter().enumerate() {
-        let obj_file = if objects.len() == 1 {
+    let entity = entity.unwrap();
+
+    let path = xml_file.file_stem().unwrap().to_string_lossy().to_string();
+
+    for (i, object) in entity.objects.iter().enumerate() {
+        let obj_file = if entity.objects.len() == 1 {
             format!("{}.obj", path)
         } else {
             format!("{}-{}.obj", path, i + 1)

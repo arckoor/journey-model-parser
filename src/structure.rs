@@ -2,10 +2,12 @@ use std::io::BufReader;
 use std::path::Path;
 use std::{fmt, fs::File};
 
-use serde::de::MapAccess;
+use serde::de::{self, MapAccess, Unexpected};
 use serde::{de::Visitor, Deserialize, Deserializer};
 use serde_xml_rs::from_reader;
 use tracing::warn;
+
+use crate::parse::read;
 
 #[derive(Deserialize, Clone)]
 #[serde(rename = "PSSGFILE")]
@@ -111,18 +113,6 @@ pub struct RootNode {
     pub render_nodes: Vec<RenderNode>,
 }
 
-#[derive(Deserialize, Clone, Debug)]
-pub struct RenderNode {
-    #[serde(rename = "TRANSFORM")]
-    pub transform: Transform,
-}
-
-#[derive(Deserialize, Clone, Debug)]
-pub struct Transform {
-    #[serde(rename = "$value")]
-    pub matrix: String,
-}
-
 impl<'de> Deserialize<'de> for RootNode {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -160,25 +150,57 @@ impl<'de> Deserialize<'de> for RootNode {
     }
 }
 
-fn get_transform(pssg: &PssgFile) -> Transform {
-    if let Some(lib) = pssg
-        .database
-        .libraries
-        .iter()
-        .find(|l| l.library_type == "NODE")
+#[derive(Deserialize, Clone)]
+pub struct RenderNode {
+    #[serde(rename = "TRANSFORM")]
+    pub transform: Transform,
+}
+
+#[derive(Clone)]
+pub struct Transform {
+    matrix: [[f32; 4]; 4],
+}
+
+impl<'de> Deserialize<'de> for Transform {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
     {
-        if let Some(root_node) = lib.root_node.as_ref() {
-            if root_node.render_nodes.len() == 1 {
-                return root_node.render_nodes[0].transform.clone();
-            }
+        let s: String = Deserialize::deserialize(deserializer)?;
+        let data: Vec<f32> = read(&s, "float").map_err(|_| {
+            de::Error::invalid_value(Unexpected::Str(&s), &"valid matrix: invalid f32")
+        })?;
+        if data.len() != 16 {
+            return Err(de::Error::invalid_value(
+                Unexpected::Str(&s),
+                &"valid matrix: invalid length",
+            ));
         }
-    }
-    Transform {
-        matrix: "1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1".to_string(),
+
+        let matrix: [[f32; 4]; 4] = data
+            .chunks_exact(4)
+            .map(|chunk| {
+                chunk
+                    .try_into()
+                    .map_err(|_| de::Error::invalid_value(Unexpected::Str(&s), &"valid matrix"))
+            })
+            .collect::<Result<Vec<[f32; 4]>, _>>()?
+            .try_into()
+            .map_err(|_| de::Error::invalid_value(Unexpected::Str(&s), &"valid matrix"))?;
+
+        Ok(Transform { matrix })
     }
 }
 
-pub fn parse_xml_file(path: &Path) -> (Vec<DataBlock>, Vec<RenderDataSource>, Transform) {
+impl std::ops::Index<usize> for Transform {
+    type Output = [f32; 4];
+
+    fn index(&self, index: usize) -> &[f32; 4] {
+        &self.matrix[index]
+    }
+}
+
+pub fn parse_xml_file(path: &Path) -> (Vec<DataBlock>, Vec<RenderDataSource>, Option<RootNode>) {
     let pssg_file: PssgFile = {
         let file = File::open(path).expect("Failed to open file");
         let reader = BufReader::new(file);
@@ -217,7 +239,11 @@ pub fn parse_xml_file(path: &Path) -> (Vec<DataBlock>, Vec<RenderDataSource>, Tr
         .filter(|r| r.index_source.index_data.is_some())
         .collect::<Vec<_>>();
 
-    let transform = get_transform(&pssg_file);
+    let root_node = pssg_file
+        .database
+        .libraries
+        .into_iter()
+        .find_map(|l| l.root_node);
 
     if source_count != render_index_sources.len() {
         warn!(
@@ -227,5 +253,5 @@ pub fn parse_xml_file(path: &Path) -> (Vec<DataBlock>, Vec<RenderDataSource>, Tr
         );
     }
 
-    (data_blocks, render_index_sources, transform)
+    (data_blocks, render_index_sources, root_node)
 }

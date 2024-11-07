@@ -2,7 +2,6 @@
 import ctypes
 import os
 import platform
-import requests
 
 import bpy  # type: ignore
 from lupa import LuaRuntime
@@ -26,6 +25,7 @@ bl_info = {
 }
 xml_cache = {}
 tex_cache = {}
+errors = []
 lib = None
 
 
@@ -44,6 +44,7 @@ class ParsedModelData(ctypes.Structure):
 
 def signature_check(lib_path, sig_path):
     import gnupg
+    import requests  # type: ignore
     if not os.path.exists(lib_path) or not os.path.exists(sig_path):
         raise FileNotFoundError(f"Library '{lib_path}' or signature '{sig_path}' file not found!")
 
@@ -165,16 +166,23 @@ def traverse_lua_table(lua_table):
                 print(f"Spawning {xml_name} for {mesh_name} with {tex}")
                 spawn_models(xml_name, mesh_name, tex, matrix)
 
+    if errors:
+        print("\nErrors:")
+        for error in errors:
+            print(error)
+
 
 def spawn_models(xml_name, mesh_name, tex, transformation_matrix):
     result = lib.ffi_parse(xml_name.encode("utf-8"))
 
-    if not result:
+    if not result or not result.contents or not result.contents.object_count:
+        errors.append(f"Failed to parse {xml_name}")
         print(f"Failed to parse {xml_name}")
         return
 
     result = result.contents
     try:
+        objs = []
         for i in range(result.object_count):
             vertices_start = sum(result.vertices_len_ptr[:i])
             uvs_start = sum(result.uvs_len_ptr[:i])
@@ -191,13 +199,21 @@ def spawn_models(xml_name, mesh_name, tex, transformation_matrix):
             translation_matrix = Matrix.Translation(Vector(result.translation_ptr[:3]))
 
             print(f"Spawning model {i+1} of {result.object_count} for {mesh_name}")
-            spawn_xml_model(vertices, uvs, faces, mesh_name, tex, transformation_matrix, translation_matrix)
+            obj = spawn_xml_model(vertices, uvs, faces, mesh_name, tex, transformation_matrix, translation_matrix, i > 0)
+            objs.append(obj)
+        if result.object_count > 1:
+            for obj in objs:
+                obj.select_set(True)
+            bpy.context.view_layer.objects.active = objs[0]
+            bpy.ops.object.join()
+            bpy.ops.object.select_all(action='DESELECT')
     finally:
         lib.ffi_free(result)
 
 
-def spawn_xml_model(vertices, uvs, faces, mesh_name, tex, transformation_matrix, translation_matrix):
+def spawn_xml_model(vertices, uvs, faces, mesh_name, tex, transformation_matrix, translation_matrix, joined=False):
     if not vertices or not faces:
+        errors.append(f"Invalid xml data for model:{mesh_name}! V:{len(vertices)} F:{len(faces)}")
         print(f"Invalid xml data for model:{mesh_name}! V:{len(vertices)} F:{len(faces)}")
         return
 
@@ -219,7 +235,7 @@ def spawn_xml_model(vertices, uvs, faces, mesh_name, tex, transformation_matrix,
     bpy.context.collection.objects.link(obj)
     obj.matrix_world = transformation_matrix
 
-    if tex is not None:
+    if tex is not None and not joined:
         texture = bpy.data.images.load(tex)
         material = bpy.data.materials.new(name=f"{mesh_name}_material")
         material.use_nodes = True
@@ -231,6 +247,8 @@ def spawn_xml_model(vertices, uvs, faces, mesh_name, tex, transformation_matrix,
 
         material.node_tree.links.new(bsdf.inputs["Base Color"], tex_image.outputs["Color"])
         material.node_tree.links.new(bsdf.inputs["Alpha"], tex_image.outputs["Alpha"])
+
+    return obj
 
 
 if __name__ == "__main__":
