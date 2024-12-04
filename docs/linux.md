@@ -37,13 +37,14 @@ Run `cargo build --release` in the project root. \
 Now that you have self-compiled binaries, you can set `VERIFY_SIGNATURE` at the top of the blender python script to `False` and comment out the Exception when prompted.
 
 ## Running the blender importer
+Open `blender_import.py` in any editor, or directly within Blender through the `Scripting` tab.
 Fill in the values for the constants at the top of the file. `<path>` refers to the absolute prefix to the file / folder, so the actual value would be e.g. `/home/arckoor/journey-model-parser/game-data/...`.
 - `LIB_PATH` - `<path>/target/release` - if you got your binaries from GitHub, use the path to folder containing both the `.so` and the `.sig` file here.
 - `XML_PATH` - `<path>/game-data/xml`
 - `TEX_PATH` - `<path>/game-data/textures`
 - `DMI_PATH` - `<path>/game-data/dmi/Level_<level>`
 
-Afterwards, import the script in Blender's `Scripting` tab, and press "Run Script".
+Afterwards, if you haven't yet, import the script in Blender's `Scripting` tab, and press "Run Script".
 
 ## Converting `.xml` to `.obj`
 If you just want `.obj` files, run `cargo run --release -- path/to/file.xml`, or use `target/release/journey-model-parser path/to/file.xml` directly. This functionality is only available if you compiled the project yourself.
