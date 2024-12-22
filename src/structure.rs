@@ -3,28 +3,30 @@ use std::path::Path;
 use std::{fmt, fs::File};
 
 use serde::de::{self, MapAccess, Unexpected};
+use serde::Serialize;
 use serde::{de::Visitor, Deserialize, Deserializer};
 use serde_xml_rs::from_reader;
 use tracing::warn;
 
+use crate::error::ParseError;
 use crate::parse::read;
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 #[serde(rename = "PSSGFILE")]
 pub struct PssgFile {
     #[serde(rename = "PSSGDATABASE")]
     pub database: PssgDatabase,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct PssgDatabase {
-    #[serde(rename = "TYPEINFO")]
+    #[serde(rename = "TYPEINFO", default)]
     pub type_info: Vec<TypeInfo>,
-    #[serde(rename = "LIBRARY")]
+    #[serde(rename = "LIBRARY", default)]
     pub libraries: Vec<Library>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct TypeInfo {
     #[serde(rename = "typeName")]
     pub type_name: String,
@@ -32,7 +34,7 @@ pub struct TypeInfo {
     pub type_count: usize,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct Library {
     #[serde(rename = "type")]
     pub library_type: String,
@@ -40,11 +42,11 @@ pub struct Library {
     pub data_blocks: Vec<DataBlock>,
     #[serde(rename = "SEGMENTSET", default)]
     pub segment_sets: Vec<SegmentSet>,
-    #[serde(rename = "ROOTNODE", default)]
-    pub root_node: Option<RootNode>,
+    #[serde(rename = "ROOTNODE")]
+    pub root_node: Option<Node>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct DataBlock {
     #[serde(rename = "elementCount")]
     pub element_count: usize,
@@ -52,11 +54,10 @@ pub struct DataBlock {
     pub stream: DataBlockStream,
     #[serde(rename = "DATABLOCKDATA")]
     pub data: Option<DataBlockData>,
-    #[serde(rename = "id")]
     pub id: String,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct DataBlockStream {
     #[serde(rename = "renderType")]
     pub render_type: String,
@@ -64,31 +65,29 @@ pub struct DataBlockStream {
     pub data_type: String,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct DataBlockData {
     #[serde(rename = "$value")]
     pub text: String,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct SegmentSet {
-    #[serde(rename = "RENDERDATASOURCE")]
+    #[serde(rename = "RENDERDATASOURCE", default)]
     pub render_data_sources: Vec<RenderDataSource>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct RenderDataSource {
     #[serde(rename = "RENDERINDEXSOURCE")]
     pub index_source: RenderIndexSource,
-    #[serde(rename = "RENDERSTREAM")]
+    #[serde(rename = "RENDERSTREAM", default)]
     pub streams: Vec<RenderStream>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct RenderIndexSource {
-    #[serde(rename = "primitive")]
     pub primitive: String,
-    #[serde(rename = "count")]
     pub count: usize,
     #[serde(rename = "INDEXSOURCEDATA")]
     pub index_data: Option<IndexSourceData>,
@@ -96,69 +95,100 @@ pub struct RenderIndexSource {
     pub data_type: String,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct IndexSourceData {
     #[serde(rename = "$value")]
     pub text: String,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct RenderStream {
     #[serde(rename = "dataBlock")]
     pub data_block: String,
 }
 
-#[derive(Clone)]
-pub struct RootNode {
-    pub render_nodes: Vec<RenderNode>,
+#[derive(Deserialize, Clone, Debug)]
+pub enum NodeKind {
+    Root(Node),
+    Render(Node),
+    Joint(Node),
+    Node(Node),
 }
 
-impl<'de> Deserialize<'de> for RootNode {
+#[derive(Clone, Debug)]
+pub struct Node {
+    pub transform: Transform,
+    pub nodes: Vec<NodeKind>,
+    pub id: String,
+}
+
+impl<'de> Deserialize<'de> for Node {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        struct RootNodeVisitor;
+        struct NodeVisitor;
 
-        impl<'de> Visitor<'de> for RootNodeVisitor {
-            type Value = RootNode;
+        impl<'de> Visitor<'de> for NodeVisitor {
+            type Value = Node;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("struct RootNode")
+                formatter.write_str("a node")
             }
 
-            fn visit_map<V>(self, mut map: V) -> Result<RootNode, V::Error>
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
             where
-                V: MapAccess<'de>,
+                A: MapAccess<'de>,
             {
-                let mut render_nodes = Vec::new();
-
+                let mut transform = None;
+                let mut id = None;
+                let mut nodes = Vec::new();
                 while let Some(key) = map.next_key::<String>()? {
-                    if key == "RENDERNODE" {
-                        let node: RenderNode = map.next_value()?;
-                        render_nodes.push(node);
-                    } else {
-                        let _: serde::de::IgnoredAny = map.next_value()?;
+                    match key.as_str() {
+                        "TRANSFORM" => {
+                            transform = Some(map.next_value()?);
+                        }
+                        "ROOTNODE" | "RENDERNODE" | "JOINTNODE" | "NODE" => {
+                            let node = map.next_value::<Node>()?;
+                            match key.as_str() {
+                                "ROOTNODE" => nodes.push(NodeKind::Root(node)),
+                                "RENDERNODE" => nodes.push(NodeKind::Render(node)),
+                                "JOINTNODE" => nodes.push(NodeKind::Joint(node)),
+                                "NODE" => nodes.push(NodeKind::Node(node)),
+                                _ => unreachable!(),
+                            }
+                        }
+                        "id" => {
+                            id = Some(map.next_value()?);
+                        }
+                        _ => {
+                            map.next_value::<serde::de::IgnoredAny>()?;
+                        }
                     }
                 }
-
-                Ok(RootNode { render_nodes })
+                let transform = transform.ok_or_else(|| de::Error::missing_field("TRANSFORM"))?;
+                let id = id.ok_or_else(|| de::Error::missing_field("id"))?;
+                Ok(Node {
+                    transform,
+                    nodes,
+                    id,
+                })
             }
         }
 
-        deserializer.deserialize_map(RootNodeVisitor)
+        deserializer.deserialize_map(NodeVisitor)
     }
 }
 
-#[derive(Deserialize, Clone)]
-pub struct RenderNode {
-    #[serde(rename = "TRANSFORM")]
-    pub transform: Transform,
-}
-
-#[derive(Clone)]
+#[derive(Serialize, Clone, Debug)]
 pub struct Transform {
     matrix: [[f32; 4]; 4],
+}
+
+pub struct ModelData {
+    pub data_blocks: Vec<DataBlock>,
+    pub render_index_sources: Vec<RenderDataSource>,
+    pub root_node: Option<NodeKind>,
 }
 
 impl<'de> Deserialize<'de> for Transform {
@@ -192,6 +222,19 @@ impl<'de> Deserialize<'de> for Transform {
     }
 }
 
+impl Default for Transform {
+    fn default() -> Self {
+        Self {
+            matrix: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+        }
+    }
+}
+
 impl std::ops::Index<usize> for Transform {
     type Output = [f32; 4];
 
@@ -200,11 +243,11 @@ impl std::ops::Index<usize> for Transform {
     }
 }
 
-pub fn parse_xml_file(path: &Path) -> (Vec<DataBlock>, Vec<RenderDataSource>, Option<RootNode>) {
+pub fn parse_xml_file(path: &Path) -> Result<ModelData, ParseError> {
     let pssg_file: PssgFile = {
         let file = File::open(path).expect("Failed to open file");
         let reader = BufReader::new(file);
-        from_reader(reader).expect("Failed to parse XML")
+        from_reader(reader).map_err(|e| ParseError::new(&format!("{:?}", e)))?
     };
 
     let source_count = pssg_file
@@ -243,7 +286,7 @@ pub fn parse_xml_file(path: &Path) -> (Vec<DataBlock>, Vec<RenderDataSource>, Op
         .database
         .libraries
         .into_iter()
-        .find_map(|l| l.root_node);
+        .find_map(|l| l.root_node.map(NodeKind::Root));
 
     if source_count != render_index_sources.len() {
         warn!(
@@ -253,5 +296,9 @@ pub fn parse_xml_file(path: &Path) -> (Vec<DataBlock>, Vec<RenderDataSource>, Op
         );
     }
 
-    (data_blocks, render_index_sources, root_node)
+    Ok(ModelData {
+        data_blocks,
+        render_index_sources,
+        root_node,
+    })
 }

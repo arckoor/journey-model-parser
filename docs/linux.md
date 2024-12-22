@@ -4,7 +4,7 @@ As there are countless distributions, you will need to consult your package mana
 
 ## Packages
 - `blender`
-- the Python `lupa` package
+- the Python `lupa` and `dataclasses_json` packages
 - `imagemagick`
 - `unzip`
 - If you want to compile the library yourself, you will need the `rust` compiler

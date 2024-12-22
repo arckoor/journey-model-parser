@@ -1,5 +1,7 @@
 /target
 /game-data
+*.lua
+*.png
 *.xml
 *.obj
 *.so

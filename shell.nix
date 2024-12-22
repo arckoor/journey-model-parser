@@ -1,18 +1,29 @@
-{ pkgs ? import <nixpkgs> {} }:
+{
+  pkgs ?
+    import <nixpkgs> {
+      overlays = [
+        (import (builtins.fetchTarball "https://github.com/oxalica/rust-overlay/archive/master.tar.gz"))
+      ];
+    },
+}:
 pkgs.mkShell {
   buildInputs = with pkgs; [
-    cargo
-    clippy
-    gcc
-    rustc
-    rustfmt
+    rust-bin.stable.latest.default
 
     blender-hip
     gh
     gnupg
     gzip
     imagemagick
-    (python311.withPackages (ps: with ps; [ flake8 lupa python-gnupg ]))
+    (python311.withPackages (
+      ps:
+        with ps; [
+          dataclasses-json
+          flake8
+          lupa
+          python-gnupg
+        ]
+    ))
     unzip
   ];
 

@@ -41,14 +41,14 @@ where
 
     bytes
         .chunks(stride)
-        .map(|chunk| match (stride, data_type) {
-            (1, "uchar") => Ok(T::from(chunk[0])),
-            (2, "ushort") => {
+        .map(|chunk| match data_type {
+            "uchar" => Ok(T::from(chunk[0])),
+            "ushort" => {
                 let arr = <[u8; 2]>::try_from(chunk)
                     .map_err(|_| ParseError::new("Invalid length for u16"))?;
                 Ok(T::from(u16::from_be_bytes(arr)))
             }
-            (2, "half") => {
+            "half" => {
                 let arr = <[u8; 2]>::try_from(chunk)
                     .map_err(|_| ParseError::new("Invalid length for u16"))?;
 
@@ -57,7 +57,7 @@ where
                     .parse::<T>()
                     .map_err(|_| ParseError::new("Failed to convert half to target type"))
             }
-            (4, "float") => {
+            "float" => {
                 let arr = <[u8; 4]>::try_from(chunk)
                     .map_err(|_| ParseError::new("Invalid length for f32"))?;
                 let f = f32::from_be_bytes(arr);

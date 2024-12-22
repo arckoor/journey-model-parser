@@ -1,4 +1,4 @@
-use tracing::warn;
+use serde::Serialize;
 
 use crate::{
     error::ParseError,
@@ -10,6 +10,7 @@ type Vertices = Vec<[f32; 3]>;
 type UVs = Vec<[f32; 2]>;
 type Faces = Vec<[u32; 3]>;
 
+#[derive(Serialize, Debug)]
 pub struct Object {
     pub vertices: Vertices,
     pub uvs: UVs,
@@ -56,7 +57,6 @@ impl Object {
     ) -> Result<(Vertices, UVs, Faces), ParseError> {
         let mut vertices = Vec::new();
         let mut uvs = Vec::new();
-        let mut faces = Vec::new();
 
         for render_stream in &source.streams {
             let block_id = render_stream.data_block.replace("#", "");
@@ -73,13 +73,13 @@ impl Object {
             }
         }
 
-        faces.extend(Self::decode_faces(&source.index_source)?);
+        let faces = Self::decode_faces(&source.index_source)?;
 
         Ok((vertices, uvs, faces))
     }
 
     fn decode_vertices(block: &DataBlock) -> Result<Vertices, ParseError> {
-        let data: Vec<f32> = read(
+        let data = read(
             &block
                 .data
                 .as_ref()
@@ -88,7 +88,10 @@ impl Object {
             "float",
         )?;
 
-        let vertices: Vec<[f32; 3]> = data.chunks(3).map(|c| [c[0], c[1], c[2]]).collect();
+        let vertices = data
+            .chunks(3)
+            .map(|c| [c[0], c[1], c[2]])
+            .collect::<Vec<_>>();
         if block.element_count != vertices.len() {
             return Err(ParseError::new("Vertex count does not match element count"));
         }
@@ -96,7 +99,7 @@ impl Object {
     }
 
     fn decode_uvs(block: &DataBlock) -> Result<UVs, ParseError> {
-        let data: Vec<f32> = read(
+        let data = read(
             &block
                 .data
                 .as_ref()
@@ -105,10 +108,10 @@ impl Object {
             "half",
         )?;
 
-        let uvs: Vec<[f32; 2]> = if block.stream.data_type == "half2" {
-            data.chunks(2).map(|c| [c[0], c[1]]).collect()
+        let uvs = if block.stream.data_type == "half2" {
+            data.chunks(2).map(|c| [c[0], c[1]]).collect::<Vec<_>>()
         } else {
-            data.chunks(4).map(|c| [c[0], c[1]]).collect()
+            data.chunks(4).map(|c| [c[0], c[1]]).collect::<Vec<_>>()
         };
 
         if block.element_count != uvs.len() {
@@ -130,27 +133,20 @@ impl Object {
                 .text,
             &source.data_type,
         )?;
-        let mut faces = Vec::new();
 
-        for i in (0..data.len()).step_by(3) {
-            faces.push([data[i], data[i + 1], data[i + 2]]);
+        let faces = data
+            .chunks(3)
+            .map(|c| [c[0], c[1], c[2]])
+            .collect::<Vec<_>>();
+
+        if source.count != faces.len() * 3 {
+            return Err(ParseError::new(&format!(
+                "Face count {} does not match face data {}",
+                source.count,
+                faces.len() * 3
+            )));
         }
-        if source.count % 3 != 0 {
-            warn!(
-                "{}",
-                format!("Face count ({}) is not a multiple of 3", source.count)
-            );
-        }
-        if source.count / 3 != faces.len() {
-            warn!(
-                "{}",
-                format!(
-                    "Face count ({}) does not match face data ({})",
-                    source.count / 3,
-                    faces.len()
-                )
-            );
-        }
+
         Ok(faces)
     }
 }

@@ -1,14 +1,21 @@
+from __future__ import annotations
 
 import ctypes
 import os
 import platform
+import re
+import time
+from typing import Optional
 
 import bpy  # type: ignore
 from lupa import LuaRuntime
-from mathutils import Vector, Matrix  # type: ignore
+from dataclasses import dataclass
+from dataclasses_json import DataClassJsonMixin
+from mathutils import Matrix  # type: ignore
 
 # Configuration
 VERIFY_SIGNATURE = True  # Verify the library signature. DISABLING THIS IS NOT RECOMMENDED!
+ARMATURE_FULL = False  # Use all Nodes for creating the armature, not just Joint Nodes.
 LIB_PATH = ""
 XML_PATH = ""
 TEX_PATH = ""
@@ -16,7 +23,7 @@ DMI_PATH = ""
 EXCLUDED = []
 
 # Constants
-VERSION = "0.7.1"
+VERSION = "0.8.0"
 bl_info = {
     "name": "Journey Level Importer",
     "blender": (2, 80, 0),
@@ -29,17 +36,43 @@ errors = []
 lib = None
 
 
-class ParsedModelData(ctypes.Structure):
-    _fields_ = [
-        ("object_count", ctypes.c_size_t),
-        ("vertices_ptr", ctypes.POINTER(ctypes.c_float)),
-        ("uvs_ptr", ctypes.POINTER(ctypes.c_float)),
-        ("faces_ptr", ctypes.POINTER(ctypes.c_uint32)),
-        ("vertices_len_ptr", ctypes.POINTER(ctypes.c_size_t)),
-        ("uvs_len_ptr", ctypes.POINTER(ctypes.c_size_t)),
-        ("faces_len_ptr", ctypes.POINTER(ctypes.c_size_t)),
-        ("translation_ptr", ctypes.POINTER(ctypes.c_float)),
-    ]
+@dataclass
+class Entity(DataClassJsonMixin):
+    objects: list[Object]
+    transform: Transform
+    armature: Optional[Armature] = None
+
+
+@dataclass
+class Object(DataClassJsonMixin):
+    vertices: list[list[float]]
+    uvs: list[list[float]]
+    faces: list[list[int]]
+
+
+@dataclass
+class Armature(DataClassJsonMixin):
+    root: Joint
+
+
+@dataclass
+class Joint(DataClassJsonMixin):
+    name: str
+    children: list[Joint]
+    transform: Transform
+    aliases: list[str]
+
+
+@dataclass
+class Transform(DataClassJsonMixin):
+    matrix: list[list[float]]
+
+
+@dataclass
+class Options(DataClassJsonMixin):
+    xml_root: str
+    xml_file: str
+    armature_full: bool = ARMATURE_FULL
 
 
 def signature_check(lib_path, sig_path):
@@ -87,9 +120,9 @@ def load_lib():
     lib = ctypes.CDLL(lib_path)
 
     lib.ffi_version.restype = ctypes.c_char_p
-    lib.ffi_parse.restype = ctypes.POINTER(ParsedModelData)
+    lib.ffi_parse.restype = ctypes.POINTER(ctypes.c_char)
     lib.ffi_parse.argtypes = [ctypes.c_char_p]
-    lib.ffi_free.argtypes = [ctypes.POINTER(ParsedModelData)]
+    lib.ffi_free.argtypes = [ctypes.POINTER(ctypes.c_char)]
 
     version = lib.ffi_version().decode("utf-8")
     if version != VERSION:
@@ -121,7 +154,10 @@ def find_tex_from_tex_name(tex_name: str):
 
 
 def traverse_lua_table(lua_table):
-    for _, value in lua_table.items():
+    count = len(lua_table)
+    start = time.time()
+
+    for i, (_, value) in enumerate(lua_table.items()):
         if isinstance(value, (lua_table.__class__,)):
             d = dict(value)
             mesh_name = d["Mesh"]
@@ -141,7 +177,7 @@ def traverse_lua_table(lua_table):
                 ]
                 matrix = Matrix(mat)
             else:
-                print("Failed to parse matrix")
+                print(f"Failed to parse matrix for {mesh_name}")
                 continue
 
             if isinstance(d["ShaderParams"], (lua_table.__class__,)):
@@ -158,14 +194,17 @@ def traverse_lua_table(lua_table):
                     tex = next((params[key] for key in accepted_keys if key in params), None)
 
             if not tex:
-                print("Failed to parse texture")
+                print(f"Failed to parse texture for {mesh_name}")
 
             xml_name = find_from_cache(mesh_name, xml_cache)
             tex = find_tex_from_tex_name(tex)
             if xml_name is not None:
-                print(f"Spawning {xml_name} for {mesh_name} with {tex}")
+                print(f"({i+1}/{count}) Spawning {xml_name} for {mesh_name} with {tex}")
                 spawn_models(xml_name, mesh_name, tex, matrix)
+            else:
+                print(f"Failed to find xml for {mesh_name}")
 
+    print(f"Imported {count} models in {time.time() - start:.3f}s with {len(errors)} errors.")
     if errors:
         print("\nErrors:")
         for error in errors:
@@ -173,40 +212,40 @@ def traverse_lua_table(lua_table):
 
 
 def spawn_models(xml_name, mesh_name, tex, transformation_matrix):
-    result = lib.ffi_parse(xml_name.encode("utf-8"))
+    options = Options(xml_root=XML_PATH, xml_file=f"{mesh_name}.xml")
+    result = lib.ffi_parse(options.to_json().encode("utf-8"))
 
-    if not result or not result.contents or not result.contents.object_count:
+    if not result:
         errors.append(f"Failed to parse {xml_name}")
         print(f"Failed to parse {xml_name}")
         return
 
-    result = result.contents
     try:
+        data = ctypes.string_at(result).decode("utf-8")
+        entity = Entity.from_json(data)
         objs = []
-        for i in range(result.object_count):
-            vertices_start = sum(result.vertices_len_ptr[:i])
-            uvs_start = sum(result.uvs_len_ptr[:i])
-            faces_start = sum(result.faces_len_ptr[:i])
-
-            vertices_flat = [round(result.vertices_ptr[i], 4) for i in range(vertices_start, vertices_start + result.vertices_len_ptr[i])]
-            uvs_flat = [round(result.uvs_ptr[i], 4) for i in range(uvs_start, uvs_start + result.uvs_len_ptr[i])]
-            faces_flat = [result.faces_ptr[i] for i in range(faces_start, faces_start + result.faces_len_ptr[i])]
-
-            vertices = [Vector(vertices_flat[i:i+3]) for i in range(0, len(vertices_flat), 3)]
-            uvs = [uvs_flat[i:i+2] for i in range(0, len(uvs_flat), 2)]
-            faces = [faces_flat[i:i+3] for i in range(0, len(faces_flat), 3)]
-
-            translation_matrix = Matrix.Translation(Vector(result.translation_ptr[:3]))
-
-            print(f"Spawning model {i+1} of {result.object_count} for {mesh_name}")
-            obj = spawn_xml_model(vertices, uvs, faces, mesh_name, tex, transformation_matrix, translation_matrix, i > 0)
+        translation_matrix = Matrix(entity.transform.matrix).transposed()
+        for i, object in enumerate(entity.objects):
+            print(f"Spawning model {i+1} of {len(entity.objects)} for {mesh_name}")
+            obj = spawn_xml_model(object.vertices, object.uvs, object.faces, mesh_name, tex, transformation_matrix, translation_matrix, i > 0)
             objs.append(obj)
-        if result.object_count > 1:
+        if len(objs) > 1:
             for obj in objs:
                 obj.select_set(True)
             bpy.context.view_layer.objects.active = objs[0]
             bpy.ops.object.join()
-            bpy.ops.object.select_all(action='DESELECT')
+            bpy.ops.object.select_all(action="DESELECT")
+        if entity.armature and len(objs) > 0:
+            obj_name = objs[0].name
+            armature_name = spawn_armature(obj_name, entity, transformation_matrix)
+            obj = bpy.data.objects.get(obj_name)
+            armature = bpy.data.objects.get(armature_name)
+            obj.select_set(True)
+            armature.select_set(True)
+            bpy.context.view_layer.objects.active = armature
+            bpy.ops.object.parent_set(type="ARMATURE")
+            bpy.ops.object.mode_set(mode="OBJECT")
+            bpy.ops.object.select_all(action="DESELECT")
     finally:
         lib.ffi_free(result)
 
@@ -249,6 +288,50 @@ def spawn_xml_model(vertices, uvs, faces, mesh_name, tex, transformation_matrix,
         material.node_tree.links.new(bsdf.inputs["Alpha"], tex_image.outputs["Alpha"])
 
     return obj
+
+
+def spawn_armature(object_name, entity: Entity, transformation_matrix):
+    print(f"Spawning armature for {object_name}")
+    bpy.ops.object.armature_add()
+    armature = bpy.context.object
+    armature.name = f"{object_name}_armature"
+    bpy.context.view_layer.objects.active = armature
+    bpy.ops.object.mode_set(mode="OBJECT")
+    build_armature(armature, entity.armature.root)
+    bpy.ops.object.mode_set(mode="EDIT")
+    armature.data.edit_bones.remove(armature.data.edit_bones.get("Bone"))
+    armature.matrix_world = transformation_matrix
+    return armature.name
+
+
+def build_armature(armature, node: Joint, parent_bone=None, parent_name=None, parent_matrix=None):
+    combined_matrix = None
+    matrix = Matrix(node.transform.matrix).transposed()
+    if parent_matrix:
+        if re.search(r"Flow(Hunter|Creature)_Head", armature.name):
+            combined_matrix = matrix @ parent_matrix
+        else:
+            combined_matrix = parent_matrix @ matrix
+    else:
+        combined_matrix = matrix
+
+    if parent_matrix and parent_matrix.to_translation() != combined_matrix.to_translation():
+        bpy.context.view_layer.objects.active = armature
+        bpy.context.view_layer.update()
+        bpy.ops.object.mode_set(mode="EDIT")
+        name = parent_name if parent_name != "root" else node.name
+        bone = armature.data.edit_bones.new(name)
+        if parent_bone:
+            bone.parent = armature.data.edit_bones.get(parent_bone)
+        bone.matrix = parent_matrix
+        bone.tail = combined_matrix.to_translation()
+        parent_bone = bone.name
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+    parent_name = node.name
+
+    for child in node.children:
+        build_armature(armature, child, parent_bone, parent_name, combined_matrix)
 
 
 if __name__ == "__main__":

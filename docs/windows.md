@@ -53,8 +53,15 @@ Now that you have self-compiled binaries, you can set `VERIFY_SIGNATURE` at the 
 
 ## Preparing blender
 Open Blender, go to the `Scripting` tab in the top bar, and look at the console displayed in the bottom left corner. It should mention a Python version, e.g. "Python 3.11.10" - this is the version of Python you should install. Open a shell where you can access Python and `pip` (Run `python` or `pip` to verify functionality. You may need to add Python to your system's PATH). \
-In the shell, run this command: `pip install lupa python-gnupg`. After `pip` completes the installation, go to Python's install directory, then to `lib/site-packages/`. You should find a `lupa/` and a `gnupg/` directory (if you do not have a `gnupg/` directory, you should at least have a `gnupg.py`, use that instead). Copy both, then navigate to Blender's install directory, where you will find a `python/lib/site-packages/` folder. Paste your copied files there. \
-Verify functionality by running `from lupa import LuaRuntime` and `import gnupg` in the Blender terminal.
+In the shell, run this command: `pip install lupa python-gnupg`. After `pip` completes the installation, go to Python's install directory, then to `lib/site-packages/`. You should find the following directories:
+- `dataclasses_json`
+- `gnupg`
+- `lupa`
+- `marshmallow`
+- `packaging`
+
+If you do not have directories but only `*.py` files with the same name, use these. Copy all of them, then navigate to Blender's install directory, where you will find a `python/lib/site-packages/` folder. Paste your copied files there. \
+Verify functionality by running `from lupa import LuaRuntime`, `import dataclasses_json` and `import gnupg` in the Blender terminal.
 
 ## Running the blender importer
 Open `blender_import.py` in any editor, or directly within Blender through the `Scripting` tab.
