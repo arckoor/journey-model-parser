@@ -42,6 +42,12 @@ pub struct Library {
     pub data_blocks: Vec<DataBlock>,
     #[serde(rename = "SEGMENTSET", default)]
     pub segment_sets: Vec<SegmentSet>,
+    #[serde(rename = "ANIMATIONCHANNEL", default)]
+    pub animation_channels: Vec<AnimationChannel>,
+    #[serde(rename = "ANIMATION", default)]
+    pub animations: Vec<Animation>,
+    #[serde(rename = "ANIMATIONCHANNELDATABLOCK", default)]
+    pub animation_channel_data_blocks: Vec<AnimDataBlock>,
     #[serde(rename = "ROOTNODE")]
     pub root_node: Option<Node>,
 }
@@ -105,6 +111,54 @@ pub struct IndexSourceData {
 pub struct RenderStream {
     #[serde(rename = "dataBlock")]
     pub data_block: String,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct AnimationChannel {
+    #[serde(rename = "timeBlock")]
+    pub time_block: String,
+    #[serde(rename = "valueBlock")]
+    pub value_block: String,
+    pub id: String,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct Animation {
+    #[serde(rename = "constantChannelStartTime", default)]
+    pub constant_channel_start_time: f32,
+    #[serde(rename = "constantChannelEndTime", default)]
+    pub constant_channel_end_time: f32,
+    #[serde(rename = "CHANNELREF", default)]
+    pub channel_refs: Vec<ChannelRef>,
+    #[serde(rename = "CONSTANTCHANNEL", default)]
+    pub constant_channels: Vec<ConstantChannel>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct ChannelRef {
+    pub channel: String,
+    #[serde(rename = "targetName")]
+    pub target_name: String,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct ConstantChannel {
+    pub value: String,
+    #[serde(rename = "targetName")]
+    pub target_name: String,
+    #[serde(rename = "keyType")]
+    pub key_type: String,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct AnimDataBlock {
+    #[serde(rename = "keyCount")]
+    pub key_count: usize,
+    #[serde(rename = "keyType")]
+    pub key_type: String,
+    pub id: String,
+    #[serde(rename = "KEYS")]
+    pub keys: String,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -189,6 +243,9 @@ pub struct ModelData {
     pub data_blocks: Vec<DataBlock>,
     pub render_index_sources: Vec<RenderDataSource>,
     pub root_node: Option<NodeKind>,
+    pub anim_channels: Vec<AnimationChannel>,
+    pub animations: Vec<Animation>,
+    pub anim_data_blocks: Vec<AnimDataBlock>,
 }
 
 impl<'de> Deserialize<'de> for Transform {
@@ -282,6 +339,33 @@ pub fn parse_xml_file(path: &Path) -> Result<ModelData, ParseError> {
         .filter(|r| r.index_source.index_data.is_some())
         .collect::<Vec<_>>();
 
+    let anim_channels = pssg_file
+        .clone()
+        .database
+        .libraries
+        .into_iter()
+        .filter(|l| l.library_type == "ANIMATIONCHANNEL")
+        .flat_map(|l| l.animation_channels)
+        .collect::<Vec<_>>();
+
+    let animations = pssg_file
+        .clone()
+        .database
+        .libraries
+        .into_iter()
+        .filter(|l| l.library_type == "ANIMATION")
+        .flat_map(|l| l.animations)
+        .collect::<Vec<_>>();
+
+    let anim_data_blocks = pssg_file
+        .clone()
+        .database
+        .libraries
+        .into_iter()
+        .filter(|l| l.library_type == "ANIMATIONCHANNELDATABLOCK")
+        .flat_map(|l| l.animation_channel_data_blocks)
+        .collect::<Vec<_>>();
+
     let root_node = pssg_file
         .database
         .libraries
@@ -300,5 +384,8 @@ pub fn parse_xml_file(path: &Path) -> Result<ModelData, ParseError> {
         data_blocks,
         render_index_sources,
         root_node,
+        anim_channels,
+        animations,
+        anim_data_blocks,
     })
 }

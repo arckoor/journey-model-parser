@@ -1,3 +1,4 @@
+mod animation;
 mod armature;
 mod entity;
 mod error;
@@ -6,7 +7,7 @@ mod object;
 mod parse;
 mod structure;
 
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Once;
@@ -14,7 +15,7 @@ use std::sync::Once;
 use entity::Entity;
 use error::ParseError;
 use serde::Deserialize;
-use tracing::info;
+use tracing::{error, info};
 
 use object::Object;
 
@@ -41,13 +42,48 @@ fn write_obj(object: &Object, path: &Path) {
         .expect("Failed to write to file");
 }
 
+fn add_animations(entity: &mut Entity, options: &Options) -> Result<(), ParseError> {
+    let files = match fs::read_dir(&options.xml_root) {
+        Ok(files) => files,
+        Err(e) => {
+            error!("Failed to read directory: {:?}", e);
+            return Ok(());
+        }
+    };
+
+    for file in files {
+        let file = file.map_err(|e| ParseError::new(&format!("Failed to read file: {:?}", e)))?;
+        let file_name = file
+            .file_name()
+            .into_string()
+            .map_err(|_| ParseError::new("Failed to convert file name"))?;
+        let expected_file = format!("{}_A_", options.xml_file.replace(".xml", ""));
+        if file_name.starts_with(&expected_file) && file_name.ends_with(".xml") {
+            let anim_name = file_name.replace(&expected_file, "").replace(".xml", "");
+            info!("Parsing animation file {:?}", file.path());
+            let anim_file = file.path();
+            match structure::parse_xml_file(&anim_file) {
+                Ok(model_data) => {
+                    entity.add_animations(model_data, anim_name)?;
+                }
+                Err(e) => {
+                    error!("Failed to parse animation file: {:?}", e);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub fn parse(options: &Options) -> Result<Entity, ParseError> {
     initialize_tracing();
     let timer = std::time::Instant::now();
     info!("Parsing file {:?}", options.xml_file);
     let xml_full_path = options.xml_root.join(&options.xml_file);
     let model_data = structure::parse_xml_file(&xml_full_path)?;
-    let entity = Entity::new(options, model_data)?;
+    let mut entity = Entity::new(options, model_data)?;
+    add_animations(&mut entity, options)?;
     info!("Parsing took {:?}", timer.elapsed());
     Ok(entity)
 }

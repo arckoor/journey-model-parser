@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::Serialize;
 
 use crate::{
@@ -33,17 +35,20 @@ impl Armature {
         }
 
         if children.len() == 1 {
-            return Ok(Some(Self {
-                root: children.remove(0),
-            }));
+            let mut root = children.remove(0);
+            // Self::prune_aliases(&mut root);
+            return Ok(Some(Self { root }));
         }
 
-        let root = Joint {
+        let mut root = Joint {
             name: "root".to_string(),
             children,
             transform,
             aliases: Vec::new(),
         };
+
+        // probably unnecessary, delete when sure
+        // Self::prune_aliases(&mut root);
 
         Ok(Some(Self { root }))
     }
@@ -84,5 +89,26 @@ impl Armature {
         }
 
         joint_nodes
+    }
+
+    fn prune_aliases(node: &mut Joint) {
+        let mut common = HashMap::new();
+        for child in &node.children {
+            for alias in &child.aliases {
+                let count = common.entry(alias.clone()).or_insert(0);
+                *count += 1;
+            }
+        }
+        for child in &mut node.children {
+            for alias in child.aliases.clone() {
+                if *common.get(&alias).unwrap() > 1 {
+                    child.aliases.retain(|a| a != &alias);
+                }
+            }
+        }
+
+        for child in &mut node.children {
+            Self::prune_aliases(child);
+        }
     }
 }

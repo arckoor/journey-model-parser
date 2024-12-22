@@ -1,6 +1,7 @@
 use serde::Serialize;
 
 use crate::{
+    animation::Animation,
     armature::Armature,
     error::ParseError,
     object::Object,
@@ -13,6 +14,7 @@ pub struct Entity {
     pub objects: Vec<Object>,
     pub transform: Transform,
     pub armature: Option<Armature>,
+    pub animations: Vec<Animation>,
 }
 
 impl Entity {
@@ -30,10 +32,21 @@ impl Entity {
             None
         };
 
+        let mut animations = Vec::new();
+        for anim in model_data.animations {
+            animations.push(Animation::new(
+                &model_data.anim_channels,
+                anim,
+                &model_data.anim_data_blocks,
+                "base".to_string(),
+            )?);
+        }
+
         Ok(Self {
             objects,
             transform,
             armature,
+            animations,
         })
     }
 
@@ -46,5 +59,22 @@ impl Entity {
             }
         }
         Transform::default()
+    }
+
+    pub fn add_animations(
+        &mut self,
+        model_data: ModelData,
+        name: String,
+    ) -> Result<(), ParseError> {
+        for anim in model_data.animations {
+            self.animations.push(Animation::new(
+                &model_data.anim_channels,
+                anim,
+                &model_data.anim_data_blocks,
+                name.clone(),
+            )?);
+        }
+
+        Ok(())
     }
 }

@@ -11,7 +11,7 @@ import bpy  # type: ignore
 from lupa import LuaRuntime
 from dataclasses import dataclass
 from dataclasses_json import DataClassJsonMixin
-from mathutils import Matrix  # type: ignore
+from mathutils import Matrix, Quaternion, Vector  # type: ignore
 
 # Configuration
 VERIFY_SIGNATURE = True  # Verify the library signature. DISABLING THIS IS NOT RECOMMENDED!
@@ -66,6 +66,32 @@ class Joint(DataClassJsonMixin):
 @dataclass
 class Transform(DataClassJsonMixin):
     matrix: list[list[float]]
+
+
+@dataclass
+class Animation(DataClassJsonMixin):
+    name: str
+    node_animations: list[NodeAnimation]
+    constant_node_animations: list[ConstantNodeAnimation]
+    constant_start_time: float
+    constant_end_time: float
+
+
+@dataclass
+class NodeAnimation(DataClassJsonMixin):
+    target: str
+    time: list[float]
+    translation: Optional[list[list[float]]] = None
+    rotation: Optional[list[list[float]]] = None
+    scale: Optional[list[list[float]]] = None
+
+
+@dataclass
+class ConstantNodeAnimation(DataClassJsonMixin):
+    target: str
+    translation: Optional[list[float]]
+    rotation: Optional[list[float]]
+    scale: Optional[list[float]]
 
 
 @dataclass
@@ -246,6 +272,8 @@ def spawn_models(xml_name, mesh_name, tex, transformation_matrix):
             bpy.ops.object.parent_set(type="ARMATURE")
             bpy.ops.object.mode_set(mode="OBJECT")
             bpy.ops.object.select_all(action="DESELECT")
+            if entity.animations:
+                add_animations(entity, armature_name)
     finally:
         lib.ffi_free(result)
 
@@ -332,6 +360,148 @@ def build_armature(armature, node: Joint, parent_bone=None, parent_name=None, pa
 
     for child in node.children:
         build_armature(armature, child, parent_bone, parent_name, combined_matrix)
+
+
+def add_animations(entity: Entity, armature_name):
+    fps = 24
+    # todo NLA or something, selecting one animation at a time is shit
+    anim_name = "Idle"
+    armature = bpy.data.objects.get(armature_name)
+    for animation in entity.animations:
+        for node_animation in animation.node_animations:
+            if animation.name != anim_name:
+                continue
+            print(f"Adding animation {animation.name} for {node_animation.target}")
+            bones = find_bone(entity, node_animation.target, armature_name)
+            if not bones:
+                print(f"Failed to find bone for {node_animation.target}")
+                continue
+            bpy.ops.object.mode_set(mode="OBJECT")
+            action = bpy.data.actions.get(animation.name)
+            if not action:
+                action = bpy.data.actions.new(name=animation.name)
+                armature.animation_data_create()
+                armature.animation_data.action = action
+            bpy.context.view_layer.objects.active = armature
+            bpy.ops.object.mode_set(mode="POSE")
+            for bone in bones:
+                bone = armature.pose.bones.get(bone)
+                if node_animation.translation:
+                    bone.keyframe_insert(data_path="location", frame=1)
+                    translations = None
+                    if bone.tail[1] < bone.head[1]:
+                        # todo probably wrong
+                        translations = [Vector([-t[0], -t[1], -t[2]]) for t in node_animation.translation]
+                    else:
+                        translations = [Vector(t) for t in node_animation.translation]
+                    for time, loc in zip(node_animation.time, translations):
+                        frame = time * fps + 2
+                        bone.location = loc
+                        bone.keyframe_insert(data_path="location", frame=frame)
+                if node_animation.rotation:
+                    bone.keyframe_insert(data_path="rotation_quaternion", frame=1)
+
+                    rotations = None
+                    if bone.tail[1] < bone.head[1]:
+                        # the thing is facing downwards
+                        rotations = [Quaternion([-r[0], r[1], r[2], r[3]]) for r in node_animation.rotation]
+                        print(f"Flipping rotation for {bone.name}")
+                    else:
+                        rotations = [Quaternion(r) for r in node_animation.rotation]
+                    for time, rot in zip(node_animation.time, rotations):
+                        frame = time * fps + 2
+                        bone.rotation_quaternion = rot
+                        bone.keyframe_insert(data_path="rotation_quaternion", frame=frame)
+                if node_animation.scale:
+                    bone.keyframe_insert(data_path="scale", frame=1)
+                    scales = [Vector(s) for s in node_animation.scale]
+                    for time, scale in zip(node_animation.time, scales):
+                        frame = time * fps + 2
+                        bone.scale = scale
+                        bone.keyframe_insert(data_path="scale", frame=frame)
+            # scale here
+            bpy.ops.object.mode_set(mode="OBJECT")
+            bpy.ops.object.select_all(action="DESELECT")
+        # for constant_node_animation in animation.constant_node_animations:
+        #     if animation.name != anim_name:
+        #         continue
+        #     print(f"Adding constant animation {animation.name} for {constant_node_animation.target}")
+        #     bones = find_bone(entity, constant_node_animation.target, armature_name)
+        #     if not bones:
+        #         print(f"Failed to find bone for {node_animation.target}")
+        #         continue
+        #     bpy.ops.object.mode_set(mode="OBJECT")
+        #     action = bpy.data.actions.get(animation.name)
+        #     if not action:
+        #         action = bpy.data.actions.new(name=animation.name)
+        #         armature.animation_data_create()
+        #         armature.animation_data.action = action
+        #     bpy.context.view_layer.objects.active = armature
+        #     bpy.ops.object.mode_set(mode="POSE")
+        #     for bone in bones:
+        #         bone = armature.pose.bones.get(bone)
+        #         if constant_node_animation.translation:
+        #             bone.keyframe_insert(data_path="location", frame=1)
+        #             loc = Vector(constant_node_animation.translation)
+        #             bone.location = loc
+        #             bone.keyframe_insert(data_path="location", frame=animation.constant_start_time * fps + 2)
+        #             bone.keyframe_insert(data_path="location", frame=animation.constant_end_time * fps + 2)
+        #         if constant_node_animation.rotation:
+        #             rot = None
+        #             if bone.tail[1] < bone.head[1]:
+        #                 # the thing is facing downwards
+        #                 rot = Quaternion([-r[0], r[1], r[2], r[3]] for r in constant_node_animation.rotation)
+        #                 print(f"Flipping rotation for {bone.name}")
+        #             else:
+        #                 rot = Quaternion(constant_node_animation.rotation)
+        #             bone.keyframe_insert(data_path="rotation_quaternion", frame=1)
+        #             bone.rotation_quaternion = rot
+        #             bone.keyframe_insert(data_path="rotation_quaternion", frame=animation.constant_start_time * fps + 2)
+        #             bone.keyframe_insert(data_path="rotation_quaternion", frame=animation.constant_end_time * fps + 2)
+        #         if constant_node_animation.scale:
+        #             scale = Vector(constant_node_animation.scale)
+        #             bone.keyframe_insert(data_path="scale", frame=1)
+        #             bone.scale = scale
+        #             bone.keyframe_insert(data_path="scale", frame=animation.constant_start_time * fps + 2)
+        #             bone.keyframe_insert(data_path="scale", frame=animation.constant_end_time * fps + 2)
+        #     bpy.ops.object.mode_set(mode="OBJECT")
+        #     bpy.ops.object.select_all(action="DESELECT")
+
+
+def find_bone(entity: Entity, bone_name, armature_name):
+    armature = bpy.data.objects.get(armature_name)
+    bpy.ops.object.mode_set(mode="POSE")
+    candidate = None
+    if armature.pose.bones.get(bone_name):
+        candidate = bone_name
+    else:
+        for joint in entity.armature.root.children:
+            bone = find_bone_rec(joint, bone_name, armature_name)
+            if bone:
+                candidate = bone
+                break
+
+    if candidate:
+        bone_candidates = []
+        for bone in armature.pose.bones:
+            if bone.name.split(".")[0] == candidate:
+                bone_candidates.append(bone.name)
+        bpy.ops.object.mode_set(mode="OBJECT")
+        return bone_candidates
+
+
+def find_bone_rec(joint: Joint, bone_name, armature_name):
+    armature = bpy.data.objects.get(armature_name)
+    bpy.ops.object.mode_set(mode="POSE")
+    if armature.pose.bones.get(joint.name):
+        if joint.name == bone_name:
+            return joint.name
+        for name in joint.aliases:
+            if name == bone_name and armature.pose.bones.get(joint.name):
+                return joint.name
+    for child in joint.children:
+        return find_bone_rec(child, bone_name, armature_name)
+    return None
 
 
 if __name__ == "__main__":
