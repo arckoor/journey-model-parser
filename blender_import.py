@@ -14,7 +14,7 @@ from dataclasses_json import DataClassJsonMixin
 from mathutils import Matrix  # type: ignore
 
 # Configuration
-VERIFY_SIGNATURE = True  # Verify the library signature. DISABLING THIS IS NOT RECOMMENDED!
+ARMATURE = True  # Parse the armature if there is one
 ARMATURE_FULL = False  # Use all Nodes for creating the armature, not just Joint Nodes.
 LIB_PATH = ""
 XML_PATH = ""
@@ -23,15 +23,15 @@ DMI_PATH = ""
 EXCLUDED = []
 
 # Constants
-VERSION = "0.8.0"
+VERSION = "0.9.0"
 bl_info = {
     "name": "Journey Level Importer",
     "blender": (2, 80, 0),
     "category": "Import-Export",
     "description": "Import DecorationMeshInstances.lua from Journey",
 }
-xml_cache = {}
-tex_cache = {}
+xml_cache: dict[str, str] = {}
+tex_cache: dict[str, str] = {}
 errors = []
 lib = None
 
@@ -72,64 +72,37 @@ class Transform(DataClassJsonMixin):
 class Options(DataClassJsonMixin):
     xml_root: str
     xml_file: str
+    armature: bool = ARMATURE
     armature_full: bool = ARMATURE_FULL
-
-
-def signature_check(lib_path, sig_path):
-    import gnupg
-    import requests  # type: ignore
-    if not os.path.exists(lib_path) or not os.path.exists(sig_path):
-        raise FileNotFoundError(f"Library '{lib_path}' or signature '{sig_path}' file not found!")
-
-    gpg = gnupg.GPG()
-    res = requests.get("https://github.com/arckoor.gpg")
-    if res.status_code != 200:
-        raise Exception("Failed to fetch public key!")
-    p_key = res.text
-    if gpg.import_keys(p_key).count != 1:
-        raise Exception("Failed to import public key!")
-
-    with open(sig_path, "rb") as file:
-        verify = gpg.verify_file(file, lib_path, close_file=True)
-        if not verify.valid or verify.fingerprint != "42F041970716D5F9A42468CE50E6472D9E5513E8":
-            raise Exception("Invalid signature! YOU SHOULD UNDER NO CIRCUMSTANCES RUN THIS FILE!")
 
 
 def load_lib():
     global lib
     system = platform.system()
     lib_path = LIB_PATH
-    sig_path = LIB_PATH
     if system == "Linux":
         lib_path = os.path.join(lib_path, "libjourney_model_parser.so")
-        sig_path = os.path.join(sig_path, "libjourney_model_parser.so.sig")
     elif system == "Windows":
         lib_path = os.path.join(lib_path, "journey_model_parser.dll")
-        sig_path = os.path.join(sig_path, "journey_model_parser.dll.sig")
-
-    if VERIFY_SIGNATURE:
-        signature_check(lib_path, sig_path)
-    else:
-        pass
-        raise Exception(
-            "You are about to run an untrusted binary. Doing so can put your system at risk." +
-            "\nRe-download the release artifacts from GitHub, and try again. Do not run binaries you received from any other source." +
-            "\nIf you are sure you want to continue, comment out the raise statement the Blender python interpreter stopped at (in load_lib())."
-            )
 
     lib = ctypes.CDLL(lib_path)
 
+    lib.ffi_init.restype = ctypes.c_void_p
     lib.ffi_version.restype = ctypes.c_char_p
     lib.ffi_parse.restype = ctypes.POINTER(ctypes.c_char)
     lib.ffi_parse.argtypes = [ctypes.c_char_p]
     lib.ffi_free.argtypes = [ctypes.POINTER(ctypes.c_char)]
 
+    lib.ffi_init()
+
     version = lib.ffi_version().decode("utf-8")
     if version != VERSION:
-        raise Exception(f"Version mismatch! Expected a binary with version {VERSION}, got {version}. Please update your binaries / this script.")
+        raise Exception(
+            f"Version mismatch! Expected a binary with version {VERSION}, got {version}. Please update your binaries / this script."
+        )
 
 
-def create_cache(path, ext, cache):
+def create_cache(path: str, ext: str, cache: dict[str, str]):
     i = 0
     for root, _, files in os.walk(path):
         for file in files:
@@ -137,30 +110,31 @@ def create_cache(path, ext, cache):
                 filename_without_ext = os.path.splitext(file)[0]
                 full_path = os.path.join(root, file)
                 cache[filename_without_ext] = full_path
-                i = i+1
+                i = i + 1
     print(f"Cached {i} {ext} files.")
 
 
-def find_from_cache(name, cache):
+def find_from_cache(name: str, cache: dict[str, str]) -> str | None:
     for filename, full_path in cache.items():
         if name == filename:
             return full_path
 
 
-def find_tex_from_tex_name(tex_name: str):
+def find_tex_from_tex_name(tex_name: str) -> str | None:
     if tex_name is None:
         return None
-    return find_from_cache(tex_name.replace("P_", "")*2, tex_cache)
+    return find_from_cache(tex_name.replace("P_", "") * 2, tex_cache)
 
 
 def traverse_lua_table(lua_table):
     count = len(lua_table)
     start = time.time()
+    rs_time = 0
 
     for i, (_, value) in enumerate(lua_table.items()):
         if isinstance(value, (lua_table.__class__,)):
             d = dict(value)
-            mesh_name = d["Mesh"]
+            mesh_name: str = d["Mesh"]
             if mesh_name.replace("P_", "") in EXCLUDED or mesh_name in EXCLUDED:
                 continue
 
@@ -173,7 +147,7 @@ def traverse_lua_table(lua_table):
                     [numbers[2], numbers[6], numbers[10], numbers[14]],
                     [numbers[0], numbers[4], numbers[8], numbers[12]],
                     [numbers[1], numbers[5], numbers[9], numbers[13]],
-                    [numbers[3], numbers[7], numbers[11], numbers[15]]
+                    [numbers[3], numbers[7], numbers[11], numbers[15]],
                 ]
                 matrix = Matrix(mat)
             else:
@@ -185,7 +159,13 @@ def traverse_lua_table(lua_table):
                 if not shader_params:
                     tex = "ClothAtlas"  # Change me to ClothAtlasGlow to get glowing cloth!
                 else:
-                    accepted_keys = ["texColor", "texCham", "tex", "textureAtlasA", "textureAtlasB"]
+                    accepted_keys = [
+                        "texColor",
+                        "texCham",
+                        "tex",
+                        "textureAtlasA",
+                        "textureAtlasB",
+                    ]
                     params = {
                         entry["ParamName"]: entry["ParamVal"]
                         for entry in d["ShaderParams"].values()
@@ -200,20 +180,22 @@ def traverse_lua_table(lua_table):
             tex = find_tex_from_tex_name(tex)
             if xml_name is not None:
                 print(f"({i+1}/{count}) Spawning {xml_name} for {mesh_name} with {tex}")
-                spawn_models(xml_name, mesh_name, tex, matrix)
+                rs_time += spawn_models(xml_name, mesh_name, tex, matrix)
             else:
                 print(f"Failed to find xml for {mesh_name}")
 
-    print(f"Imported {count} models in {time.time() - start:.3f}s with {len(errors)} errors.")
+    print(f"Imported {count} models in {time.time() - start:.3f}s (rs {rs_time:.3f}s) with {len(errors)} errors.")
     if errors:
         print("\nErrors:")
         for error in errors:
             print(error)
 
 
-def spawn_models(xml_name, mesh_name, tex, transformation_matrix):
+def spawn_models(xml_name: str, mesh_name: str, tex: str | None, transformation_matrix: Matrix):
     options = Options(xml_root=XML_PATH, xml_file=f"{mesh_name}.xml")
+    t1 = time.time()
     result = lib.ffi_parse(options.to_json().encode("utf-8"))
+    t2 = time.time()
 
     if not result:
         errors.append(f"Failed to parse {xml_name}")
@@ -222,12 +204,19 @@ def spawn_models(xml_name, mesh_name, tex, transformation_matrix):
 
     try:
         data = ctypes.string_at(result).decode("utf-8")
-        entity = Entity.from_json(data)
+        entity: Entity = Entity.from_json(data)
         objs = []
         translation_matrix = Matrix(entity.transform.matrix).transposed()
         for i, object in enumerate(entity.objects):
             print(f"Spawning model {i+1} of {len(entity.objects)} for {mesh_name}")
-            obj = spawn_xml_model(object.vertices, object.uvs, object.faces, mesh_name, tex, transformation_matrix, translation_matrix, i > 0)
+            obj = spawn_xml_model(
+                object,
+                mesh_name,
+                tex,
+                transformation_matrix,
+                translation_matrix,
+                i > 0,
+            )
             objs.append(obj)
         if len(objs) > 1:
             for obj in objs:
@@ -248,16 +237,24 @@ def spawn_models(xml_name, mesh_name, tex, transformation_matrix):
             bpy.ops.object.select_all(action="DESELECT")
     finally:
         lib.ffi_free(result)
+        return t2 - t1
 
 
-def spawn_xml_model(vertices, uvs, faces, mesh_name, tex, transformation_matrix, translation_matrix, joined=False):
-    if not vertices or not faces:
-        errors.append(f"Invalid xml data for model:{mesh_name}! V:{len(vertices)} F:{len(faces)}")
-        print(f"Invalid xml data for model:{mesh_name}! V:{len(vertices)} F:{len(faces)}")
+def spawn_xml_model(
+    object: Object,
+    mesh_name: str,
+    tex: str | None,
+    transformation_matrix: Matrix,
+    translation_matrix: Matrix,
+    joined=False,
+):
+    if not object.vertices or not object.faces:
+        errors.append(f"Invalid xml data for model:{mesh_name}! V:{len(object.vertices)} F:{len(object.faces)}")
+        print(f"Invalid xml data for model:{mesh_name}! V:{len(object.vertices)} F:{len(object.faces)}")
         return
 
     mesh = bpy.data.meshes.new(name=mesh_name)
-    mesh.from_pydata(vertices, [], faces)
+    mesh.from_pydata(object.vertices, [], object.faces)
 
     mesh.uv_layers.new(name="UVMap")
     uv_layer = mesh.uv_layers.active.data
@@ -265,7 +262,7 @@ def spawn_xml_model(vertices, uvs, faces, mesh_name, tex, transformation_matrix,
     for face in mesh.polygons:
         for loop_idx in face.loop_indices:
             vert_idx = mesh.loops[loop_idx].vertex_index
-            uv_layer[loop_idx].uv = uvs[vert_idx]
+            uv_layer[loop_idx].uv = object.uvs[vert_idx]
 
     mesh.transform(translation_matrix)
     mesh.update()
@@ -290,7 +287,7 @@ def spawn_xml_model(vertices, uvs, faces, mesh_name, tex, transformation_matrix,
     return obj
 
 
-def spawn_armature(object_name, entity: Entity, transformation_matrix):
+def spawn_armature(object_name: str, entity: Entity, transformation_matrix: Matrix):
     print(f"Spawning armature for {object_name}")
     bpy.ops.object.armature_add()
     armature = bpy.context.object

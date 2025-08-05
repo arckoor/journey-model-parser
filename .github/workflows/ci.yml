@@ -1,18 +1,19 @@
-name: CI
+name: ci
+
+permissions:
+  contents: read
 
 on:
   push:
-    branches:
-      - '**'
+    branches: [ main ]
   pull_request:
-    branches:
-      - '**'
+    branches: [ main ]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  fmt:
+  fmt-rust:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -21,6 +22,17 @@ jobs:
         run: rustup component add rustfmt
       - name: Format Check
         run: cargo fmt -- --check
+
+  fmt-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: psf/black@stable
+        with:
+          options: "--check --diff --color -l 120"
 
   lint:
     runs-on: ubuntu-latest
@@ -32,6 +44,7 @@ jobs:
 
   build:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
         build_flags: ["", "--release"]

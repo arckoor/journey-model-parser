@@ -11,8 +11,8 @@ Clone this repo using `git clone https://github.com/arckoor/journey-model-parser
 If you plan on compiling the rust library yourself, you can skip the next step.
 
 ### Downloading binaries
-Binaries with detached signatures are available on GitHub under "Releases".
-Download both the binary and its signature (`.sig`) matching your operating system (`.so` for Linux, `.dll` for Windows).
+Binaries are available on GitHub under "Releases".
+Download the file matching your operating system. All releases are signed with a [PGP key](https://github.com/arckoor.gpg). You may wish to `verify` the signature and attestation.
 
 ### Getting the game files
 You will need to source the iOS version of the game (`Journey.ipa`). You can get this file by converting it from your own installation, or by finding it online.

@@ -7,7 +7,6 @@ Before starting, you will need to install the following:
 - [DirectXTex](https://github.com/microsoft/DirectXTex/releases) (only `texconv.exe`)
 - [paint.net](https://www.getpaint.net/download.html)
 - [Rust](https://www.rust-lang.org/tools/install) (optional, only if you want to compile yourself)
-- [Gpg4Win / GnuPG](https://gpg4win.org/index.html) (optional, skip if you want to compile yourself)
 
 Additionally you will need `pssgConverter.py`, which you can get [here](https://www.nexusmods.com/greedfall/mods/116?tab=files) (v2.04 is known to work).
 
@@ -48,30 +47,29 @@ Delete `*.bat` and `texconv.exe` afterward.
 ## Compiling (optional)
 If you got your binaries from GitHub, you can skip this step.
 
-Run `cargo build --release` in the project root. \
-Now that you have self-compiled binaries, you can set `VERIFY_SIGNATURE` at the top of the blender python script to `False` and comment out the Exception when prompted.
+Run `cargo build --release` in the project root.
 
 ## Preparing blender
 Open Blender, go to the `Scripting` tab in the top bar, and look at the console displayed in the bottom left corner. It should mention a Python version, e.g. "Python 3.11.10" - this is the version of Python you should install. Open a shell where you can access Python and `pip` (Run `python` or `pip` to verify functionality. You may need to add Python to your system's PATH). \
-In the shell, run this command: `pip install lupa python-gnupg`. After `pip` completes the installation, go to Python's install directory, then to `lib/site-packages/`. You should find the following directories:
+In the shell, run this command: `pip install lupa dataclasses-json`. After `pip` completes the installation, go to Python's install directory, then to `lib/site-packages/`. You should find the following directories:
 - `dataclasses_json`
-- `gnupg`
 - `lupa`
 - `marshmallow`
 - `packaging`
 
 If you do not have directories but only `*.py` files with the same name, use these. Copy all of them, then navigate to Blender's install directory, where you will find a `python/lib/site-packages/` folder. Paste your copied files there. \
-Verify functionality by running `from lupa import LuaRuntime`, `import dataclasses_json` and `import gnupg` in the Blender terminal.
+Verify functionality by running `from lupa import LuaRuntime` and `import dataclasses_json` in the Blender terminal.
 
 ## Running the blender importer
 Open `blender_import.py` in any editor, or directly within Blender through the `Scripting` tab.
 Fill in the values for the constants at the top of the file. `<path>` refers to the absolute prefix to the file / folder, so the actual value would be e.g. `C:\\Users\\arckoor\\journey-model-parser\\game-data\\...`. Be sure to use `\\` instead of `/` as a path separator.
-- `LIB_PATH` - `<path>\\target\\release` - if you got your binaries from GitHub, use the path to folder containing both the `.dll` and the `.sig` file here.
+- `LIB_PATH` - `<path>\\target\\release` - if you got your binaries from GitHub, use the path to the folder containing the `.dll` file here.
 - `XML_PATH` - `<path>\\game-data\\xml`
 - `TEX_PATH` - `<path>\\game-data\\textures`
 - `DMI_PATH` - `<path>\\game-data\\dmi\\Level_<level>`
 
 Afterwards, if you haven't yet, import the script in Blender's `Scripting` tab, and press "Run Script".
 
-## Converting `.xml` to `.obj`
-If you just want `.obj` files, run `cargo run --release -- path/to/file.xml`, or use `target/release/journey-model-parser path/to/file.xml` directly. This functionality is only available if you compiled the project yourself.
+## Converting `.xml` to `.obj` / `.json`
+If you want the `.obj` or `.json` files, run e.g. `journey-model-parser.exe --obj file.xml`. See `--help` for more info.
+If you use cargo, run `cargo run --release -- --obj file.xml`.

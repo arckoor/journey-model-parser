@@ -196,8 +196,8 @@ impl<'de> Deserialize<'de> for Transform {
     where
         D: Deserializer<'de>,
     {
-        let s: String = Deserialize::deserialize(deserializer)?;
-        let data: Vec<f32> = read(&s, "float").map_err(|_| {
+        let s = <String>::deserialize(deserializer)?;
+        let data = read::<f32, 4>(&s).map_err(|_| {
             de::Error::invalid_value(Unexpected::Str(&s), &"valid matrix: invalid f32")
         })?;
         if data.len() != 16 {
@@ -207,7 +207,7 @@ impl<'de> Deserialize<'de> for Transform {
             ));
         }
 
-        let matrix: [[f32; 4]; 4] = data
+        let matrix = data
             .chunks_exact(4)
             .map(|chunk| {
                 chunk
@@ -244,11 +244,14 @@ impl std::ops::Index<usize> for Transform {
 }
 
 pub fn parse_xml_file(path: &Path) -> Result<ModelData, ParseError> {
-    let pssg_file: PssgFile = {
-        let file = File::open(path).expect("Failed to open file");
+    let pssg_file = {
+        let file = File::open(path)
+            .map_err(|e| ParseError::new(&format!("Unable to open file {path:?}: {e:?}")))?;
         let reader = BufReader::new(file);
-        from_reader(reader).map_err(|e| ParseError::new(&format!("{:?}", e)))?
+        from_reader::<_, PssgFile>(reader).map_err(|e| ParseError::new(&format!("{e:?}")))?
     };
+
+    let library_iter = pssg_file.database.libraries.into_iter();
 
     let source_count = pssg_file
         .database
@@ -261,31 +264,23 @@ pub fn parse_xml_file(path: &Path) -> Result<ModelData, ParseError> {
         })
         .type_count;
 
-    let data_blocks = pssg_file
+    let data_blocks = library_iter
         .clone()
-        .database
-        .libraries
-        .into_iter()
         .filter(|l| l.library_type == "RENDERINTERFACEBOUND")
         .flat_map(|l| l.data_blocks)
         .filter(|d| d.data.is_some())
         .collect();
 
-    let render_index_sources = pssg_file
+    let render_index_sources = library_iter
         .clone()
-        .database
-        .libraries
-        .into_iter()
         .filter(|l| l.library_type == "SEGMENTSET")
         .flat_map(|l| l.segment_sets)
         .flat_map(|s| s.render_data_sources)
         .filter(|r| r.index_source.index_data.is_some())
         .collect::<Vec<_>>();
 
-    let root_node = pssg_file
-        .database
-        .libraries
-        .into_iter()
+    let root_node = library_iter
+        .clone()
         .find_map(|l| l.root_node.map(NodeKind::Root));
 
     if source_count != render_index_sources.len() {

@@ -1,4 +1,4 @@
-name: Release
+name: release
 
 on:
   workflow_dispatch:
@@ -19,24 +19,44 @@ jobs:
         include:
           - os: ubuntu-latest
             target: ""
-            artifact_name: libjourney_model_parser.so
-            artifact_path: target/release/libjourney_model_parser.so
+            lib_name: libjourney_model_parser.so
+            lib_path: target/release/libjourney_model_parser.so
+            bin_name: journey-model-parser
+            bin_path: target/release/journey-model-parser
+
           - os: windows-latest
             target: "--target x86_64-pc-windows-gnu"
-            artifact_name: journey_model_parser.dll
-            artifact_path: target/x86_64-pc-windows-gnu/release/journey_model_parser.dll
+            lib_name: journey_model_parser.dll
+            lib_path: target/x86_64-pc-windows-gnu/release/journey_model_parser.dll
+            bin_name: journey-model-parser.exe
+            bin_path: target/x86_64-pc-windows-gnu/release/journey-model-parser.exe
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Generate library
         run: cargo build --release ${{ matrix.target }}
-      - name: Generate attestation
+
+      - name: Generate lib attestation
         uses: actions/attest-build-provenance@v1
         with:
-          subject-path: ${{ matrix.artifact_path }}
-      - name: Upload artifact
+          subject-path: ${{ matrix.lib_path }}
+
+      - name: Generate bin attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: ${{ matrix.bin_path }}
+
+      - name: Upload lib artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.artifact_path }}
+          name: ${{ matrix.lib_name }}
+          path: ${{ matrix.lib_path }}
+          retention-days: 1
+
+      - name: Upload bin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.bin_name }}
+          path: ${{ matrix.bin_path }}
           retention-days: 1

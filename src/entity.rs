@@ -24,8 +24,12 @@ impl Entity {
 
         let transform = Self::get_transform(&model_data.root_node);
 
-        let armature = if let Some(NodeKind::Root(root_node)) = model_data.root_node {
-            Armature::new(options, &NodeKind::Root(root_node))?
+        let armature = if options.armature {
+            if let Some(NodeKind::Root(root_node)) = model_data.root_node {
+                Armature::new(options, &NodeKind::Root(root_node))?
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -35,6 +39,22 @@ impl Entity {
             transform,
             armature,
         })
+    }
+
+    pub fn to_objs(&self) -> Vec<String> {
+        let mut objs = Vec::with_capacity(self.objects.len());
+        for object in &self.objects {
+            objs.push(object.to_obj());
+        }
+        objs
+    }
+
+    pub fn to_json(&self, pretty: bool) -> String {
+        if pretty {
+            serde_json::to_string_pretty(&self).expect("Serialization must work")
+        } else {
+            serde_json::to_string(&self).expect("Serialization must work")
+        }
     }
 
     fn get_transform(root_node: &Option<NodeKind>) -> Transform {

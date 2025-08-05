@@ -1,9 +1,11 @@
 /target
 /game-data
+/.direnv
 *.lua
 *.png
 *.xml
 *.obj
+*.json
 *.so
 *.dll
 *.sig

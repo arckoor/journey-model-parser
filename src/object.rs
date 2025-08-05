@@ -79,13 +79,12 @@ impl Object {
     }
 
     fn decode_vertices(block: &DataBlock) -> Result<Vertices, ParseError> {
-        let data = read(
+        let data = read::<f32, 4>(
             &block
                 .data
                 .as_ref()
                 .ok_or_else(|| ParseError::new("Missing vertex block data"))?
                 .text,
-            "float",
         )?;
 
         let vertices = data
@@ -99,13 +98,12 @@ impl Object {
     }
 
     fn decode_uvs(block: &DataBlock) -> Result<UVs, ParseError> {
-        let data = read(
+        let data = read::<f32, 2>(
             &block
                 .data
                 .as_ref()
                 .ok_or_else(|| ParseError::new("Missing uv block data"))?
                 .text,
-            "half",
         )?;
 
         let uvs = if block.stream.data_type == "half2" {
@@ -125,15 +123,17 @@ impl Object {
     }
 
     fn decode_faces(source: &RenderIndexSource) -> Result<Faces, ParseError> {
-        let data = read(
-            &source
-                .index_data
-                .as_ref()
-                .ok_or_else(|| ParseError::new("Missing faces block data"))?
-                .text,
-            &source.data_type,
-        )?;
+        let data = &source
+            .index_data
+            .as_ref()
+            .ok_or_else(|| ParseError::new("Missing faces block data"))?
+            .text;
 
+        let data = match source.data_type.as_str() {
+            "uchar" => read::<u32, 1>(data)?,
+            "ushort" => read::<u32, 2>(data)?,
+            _ => unreachable!(),
+        };
         let faces = data
             .chunks(3)
             .map(|c| [c[0], c[1], c[2]])

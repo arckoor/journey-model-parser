@@ -9,10 +9,6 @@ As there are countless distributions, you will need to consult your package mana
 - `unzip`
 - If you want to compile the library yourself, you will need the `rust` compiler
 
-If you do not want to compile yourself, and instead use the GitHub releases, you will need the following as well:
-- `gnupg`
-- `python-gnupg`
-
 Additionally you will need `pssgConverter.py`, which you can get [here](https://www.nexusmods.com/greedfall/mods/116?tab=files) (v2.04 is known to work).
 
 ## XML files
@@ -33,18 +29,18 @@ Run `convert_dds game-data/textures`, which should leave you with the `textures`
 ## Compiling (optional)
 If you got your binaries from GitHub, you can skip this step.
 
-Run `cargo build --release` in the project root. \
-Now that you have self-compiled binaries, you can set `VERIFY_SIGNATURE` at the top of the blender python script to `False` and comment out the Exception when prompted.
+Run `cargo build --release` in the project root.
 
 ## Running the blender importer
 Open `blender_import.py` in any editor, or directly within Blender through the `Scripting` tab.
 Fill in the values for the constants at the top of the file. `<path>` refers to the absolute prefix to the file / folder, so the actual value would be e.g. `/home/arckoor/journey-model-parser/game-data/...`.
-- `LIB_PATH` - `<path>/target/release` - if you got your binaries from GitHub, use the path to folder containing both the `.so` and the `.sig` file here.
+- `LIB_PATH` - `<path>/target/release` - if you got your binaries from GitHub, use the path to the folder containing the `.so` file here
 - `XML_PATH` - `<path>/game-data/xml`
 - `TEX_PATH` - `<path>/game-data/textures`
 - `DMI_PATH` - `<path>/game-data/dmi/Level_<level>`
 
 Afterwards, if you haven't yet, import the script in Blender's `Scripting` tab, and press "Run Script".
 
-## Converting `.xml` to `.obj`
-If you just want `.obj` files, run `cargo run --release -- path/to/file.xml`, or use `target/release/journey-model-parser path/to/file.xml` directly. This functionality is only available if you compiled the project yourself.
+## Converting `.xml` to `.obj` / `.json`
+If you want the `.obj` or `.json` files, run e.g. `journey-model-parser --obj file.xml`. See `--help` for more info.
+If you use cargo, run `cargo run --release -- --obj file.xml`.

@@ -32,6 +32,7 @@
   "cSpell.ignorePaths": [
     "*.xml"
   ],
-  "nixEnvSelector.nixFile": "${workspaceFolder}/shell.nix",
-  "editor.formatOnSave": true
+  "files.exclude": {
+    ".direnv": true,
+  }
 }

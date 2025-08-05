@@ -1,36 +1,29 @@
 use crate::error::ParseError;
 
-pub fn read<T>(data: &str, data_type: &str) -> Result<Vec<T>, ParseError>
-where
-    T: From<u8> + From<u16> + std::str::FromStr,
-    <T as std::str::FromStr>::Err: std::fmt::Display,
-{
-    if data
-        .chars()
-        .all(|c| c.is_ascii_hexdigit() || c.is_whitespace())
-        && data.split_whitespace().all(|s| {
-            s.len() == 2
-                && !((s.len() > 1 && s.starts_with("0") && s.chars().all(|c| c.is_ascii_digit()))
-                    && (data.contains("e+") || data.contains("e-")))
-        })
-    {
-        return read_hex(data, data_type);
-    }
-    read_decimal(data)
+pub trait FromBytes<const STRIDE: usize>: Sized {
+    fn from_bytes(bytes: &[u8; STRIDE]) -> Self;
 }
 
-fn read_hex<T>(data: &str, data_type: &str) -> Result<Vec<T>, ParseError>
-where
-    T: From<u8> + From<u16> + std::str::FromStr,
-    <T as std::str::FromStr>::Err: std::fmt::Display,
-{
-    let stride = match data_type {
-        "uchar" => 1,
-        "ushort" | "half" => 2,
-        "float" => 4,
-        _ => return Err(ParseError::new(&format!("Unknown data type {}", data_type))),
+macro_rules! impl_from_bytes {
+    ($ty:ty, $stride:literal, $expr:expr) => {
+        impl FromBytes<$stride> for $ty {
+            fn from_bytes(bytes: &[u8; $stride]) -> Self {
+                $expr(*bytes)
+            }
+        }
     };
+}
 
+impl_from_bytes!(u32, 1, |b: [u8; 1]| b[0] as u32);
+impl_from_bytes!(u32, 2, |b: [u8; 2]| u16::from_be_bytes(b) as u32);
+impl_from_bytes!(u32, 4, |b: [u8; 4]| u32::from_be_bytes(b));
+impl_from_bytes!(f32, 2, |b: [u8; 2]| half_to_f32(u16::from_be_bytes(b)));
+impl_from_bytes!(f32, 4, |b: [u8; 4]| f32::from_be_bytes(b));
+
+pub fn read<T, const STRIDE: usize>(data: &str) -> Result<Vec<T>, ParseError>
+where
+    T: FromBytes<STRIDE>,
+{
     let bytes = data
         .split_whitespace()
         .map(|s| {
@@ -39,48 +32,16 @@ where
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    bytes
-        .chunks(stride)
-        .map(|chunk| match data_type {
-            "uchar" => Ok(T::from(chunk[0])),
-            "ushort" => {
-                let arr = <[u8; 2]>::try_from(chunk)
-                    .map_err(|_| ParseError::new("Invalid length for u16"))?;
-                Ok(T::from(u16::from_be_bytes(arr)))
-            }
-            "half" => {
-                let arr = <[u8; 2]>::try_from(chunk)
-                    .map_err(|_| ParseError::new("Invalid length for u16"))?;
+    if bytes.len() % STRIDE != 0 {
+        return Err(ParseError::new("Data length is not a multiple of stride"));
+    }
 
-                let f = half_to_f32(u16::from_be_bytes(arr));
-                f.to_string()
-                    .parse::<T>()
-                    .map_err(|_| ParseError::new("Failed to convert half to target type"))
-            }
-            "float" => {
-                let arr = <[u8; 4]>::try_from(chunk)
-                    .map_err(|_| ParseError::new("Invalid length for f32"))?;
-                let f = f32::from_be_bytes(arr);
-                f.to_string()
-                    .parse::<T>()
-                    .map_err(|_| ParseError::new("Failed to convert f32 to target type"))
-            }
-            _ => unreachable!(),
+    Ok(bytes
+        .chunks_exact(STRIDE)
+        .map(|chunk| {
+            T::from_bytes(<&[u8; STRIDE]>::try_from(chunk).expect("Chunk must be correct size"))
         })
-        .collect()
-}
-
-fn read_decimal<T>(data: &str) -> Result<Vec<T>, ParseError>
-where
-    T: std::str::FromStr,
-    <T as std::str::FromStr>::Err: std::fmt::Display,
-{
-    data.split_whitespace()
-        .map(|s| {
-            s.parse::<T>()
-                .map_err(|e| ParseError::new(&format!("Failed to decode decimal data: {e}")))
-        })
-        .collect::<Result<Vec<_>, _>>()
+        .collect())
 }
 
 fn half_to_f32(half: u16) -> f32 {
