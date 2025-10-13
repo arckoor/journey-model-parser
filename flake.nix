@@ -1,5 +1,4 @@
 {
-  description = "flare devshell";
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     systems.url = "github:nix-systems/default";
@@ -87,6 +86,7 @@
           packages = with pkgs;
             [
               rust-bin.stable.latest.default
+              cargo-edit
 
               black
               blender-unwrapped

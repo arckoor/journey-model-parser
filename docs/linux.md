@@ -1,6 +1,6 @@
 # journey-model-parser (Linux)
 This part of the guide assumes you have at least some experience using the shell and various commands. \
-As there are countless distributions, you will need to consult your package manager on how to install the tools we will need. If you have access to the [nix](https://nixos.org/download/) package manager, you can use the provided [shell.nix](../shell.nix) file, it sets up everything necessary. The following assumes you use nix; if you don't, refer to `shell.nix` for the commands used.
+As there are countless distributions, you will need to consult your package manager on how to install the tools we will need. If you have access to the [nix](https://nixos.org/download/) package manager, you can use the provided [shell.nix](../flake.nix) file, it sets up everything necessary. The following assumes you use nix; if you don't, refer to `flake.nix` for the commands used.
 
 ## Packages
 - `blender`
